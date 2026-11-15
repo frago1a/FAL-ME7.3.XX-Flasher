@@ -10,7 +10,8 @@ interna e aplicação) e em testes numa ECU real.
 
 > **Atenção.** O flash apaga a ECU. Se o processo for interrompido depois de apagar, a ECU fica sem aplicação e
 > não arranca até ser reprogramada — outra vez por OBD, se o programador ainda estiver a correr, ou então pelo
-> **bootstrap loader (BSL)** do C167, o que obriga a abrir a ECU. Usa uma alimentação estável, não mexas no
+> **bootstrap loader (BSL)** do C167, que nesta família se entra por um pino do conector (sem abrir a ECU). Usa
+> uma alimentação estável, não mexas no
 > cabo nem no PC durante o flash, e tem o BSL à mão na primeira ECU de cada modelo.
 
 ## A ECU

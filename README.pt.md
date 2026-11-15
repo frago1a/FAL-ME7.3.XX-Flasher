@@ -7,7 +7,8 @@ Flasher por OBD para a família de centralinas **Bosch ME7.3.1** (Fiat, Alfa Rom
 diagnóstico, como faz a ferramenta de fábrica da Fiat.
 
 > **Usa por tua conta e risco.** O flash apaga a ECU. Uma interrupção depois de apagar deixa a ECU sem
-> arrancar até ser reprogramada; a recuperação pode obrigar ao bootstrap loader do C167 (abrir a ECU). Lê o
+> arrancar até ser reprogramada. A recuperação precisa do bootstrap loader do C167 (BSL), que nesta família
+> se entra por um pino do conector — sem abrir a ECU. Lê o
 > [docs/FLASHING.pt.md](docs/FLASHING.pt.md) antes de usar, usa uma alimentação estável e começa com uma ECU
 > que consigas recuperar.
 

@@ -7,7 +7,8 @@ OBD flasher for the **Bosch ME7.3.1** engine ECU family (Fiat, Alfa Romeo, Lanci
 diagnostic port, the same way the Fiat factory tool does.
 
 > **Use at your own risk.** Flashing erases the ECU. An interruption after the erase leaves the ECU unable to
-> start until it is reprogrammed; recovery may require the C167 bootstrap loader (opening the ECU). Read
+> start until it is reprogrammed. Recovery needs the C167 bootstrap loader (BSL), which on this family is
+> entered through a pin on the connector — no need to open the ECU. Read
 > [docs/FLASHING.md](docs/FLASHING.md) before using it, use a stable power supply, and start with an ECU you
 > can recover.
 

@@ -10,7 +10,8 @@ firmware (internal ROM and application) and on tests on a real ECU.
 
 > **Warning.** Flashing erases the ECU. If the process is interrupted after the erase, the ECU has no
 > application and will not start until it is reprogrammed — over OBD again if the programmer still runs,
-> otherwise through the C167 **bootstrap loader (BSL)**, which requires opening the ECU. Use a stable power
+> otherwise through the C167 **bootstrap loader (BSL)**, entered via a pin on the connector on this family
+> (no need to open the ECU). Use a stable power
 > supply, do not touch the cable or the PC during the flash, and keep a BSL setup at hand for the first
 > ECU of each model.
 
