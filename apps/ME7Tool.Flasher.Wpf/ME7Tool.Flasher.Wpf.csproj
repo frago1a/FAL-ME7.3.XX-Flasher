@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ME7Tool.Core\ME7Tool.Core.csproj" />
+    <ProjectReference Include="..\..\src\ME7Tool.Devices\ME7Tool.Devices.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tradução para inglês: tradutor dos textos fixos (partilhado) + dicionário desta aplicação. -->
+    <Compile Include="..\Shared\UiLocalizer.cs" Link="Shared\UiLocalizer.cs" />
+    <EmbeddedResource Include="i18n_en.txt" LogicalName="i18n_en.txt" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- x86: os drivers J2534 (Scanmatik, Mongoose…) só têm DLL 32-bit. O FTDI tem as duas. -->
+    <PlatformTarget>x86</PlatformTarget>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <Product>FAL ME7.3.XX Flasher</Product>
+    <AssemblyTitle>FAL ME7.3.XX Flasher</AssemblyTitle>
+  </PropertyGroup>
+
+</Project>

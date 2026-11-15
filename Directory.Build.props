@@ -1,0 +1,10 @@
+<Project>
+  <!-- Fonte única do TFM. net10.0 (LTS) — alinhado com NefMoto e J2534-Sharp. -->
+  <PropertyGroup>
+    <TargetFrameworkCore>net10.0</TargetFrameworkCore>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

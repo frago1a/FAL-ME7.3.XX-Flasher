@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\ME7Tool.Core\ME7Tool.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>$(TargetFrameworkCore)-windows</TargetFramework>
+    <RootNamespace>ME7Tool.Devices</RootNamespace>
+  </PropertyGroup>
+
+</Project>

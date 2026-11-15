@@ -1,0 +1,141 @@
+﻿<Window x:Class="ME7Tool.Flasher.Wpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FAL ME7.3.XX Flasher" Height="680" Width="960" Closing="Window_Closing"
+        Background="#1E1E1E" Foreground="#E0E0E0" FontFamily="Segoe UI" FontSize="13">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Background" Value="#3A3D41"/>
+            <Setter Property="Foreground" Value="#E0E0E0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="6"/>
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="BorderBrush" Value="#3A3D41"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#2D2D30"/>
+            <Setter Property="Foreground" Value="#E0E0E0"/>
+            <Setter Property="BorderBrush" Value="#3A3D41"/>
+            <Setter Property="Padding" Value="3"/>
+            <Setter Property="Margin" Value="2"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#E0E0E0"/>
+            <Setter Property="Margin" Value="2,3"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="170"/>
+        </Grid.RowDefinitions>
+
+        <!-- Barra de ligação -->
+        <WrapPanel Grid.Row="0" VerticalAlignment="Center">
+            <TextBlock Text="Interface:" VerticalAlignment="Center" Margin="4"/>
+            <ComboBox x:Name="cmbIface" Width="90" Margin="4" SelectedIndex="1" SelectionChanged="cmbIface_Changed">
+                <ComboBoxItem>Série</ComboBoxItem>
+                <ComboBoxItem>FTDI</ComboBoxItem>
+                <ComboBoxItem ToolTip="Interface J2534 (ex.: Scanmatik 2) em K-line ISO14230: o interface faz o init e o framing.">J2534</ComboBoxItem>
+            </ComboBox>
+            <TextBlock x:Name="lblPort" Text="Porta:" VerticalAlignment="Center" Margin="4"/>
+            <ComboBox x:Name="cmbPort" Width="100" Margin="4"/>
+            <ComboBox x:Name="cmbJ2534" Width="150" Margin="4" Visibility="Collapsed" ToolTip="Dispositivo J2534 registado no Windows"/>
+            <Button Content="⟳" Width="30" Click="btnRefresh_Click" ToolTip="Atualizar portas e dispositivos"/>
+            <TextBlock Text="Baud flash:" VerticalAlignment="Center" Margin="4"
+                       ToolTip="O init é sempre a 10400. Este baud é pedido no StartDiagnosticSession 0x85; se a ECU recusar, fica a 10400."/>
+            <ComboBox x:Name="cmbBaud" IsEditable="True" Text="124800" Width="85" Margin="2">
+                <ComboBoxItem>10400</ComboBoxItem><ComboBoxItem>38400</ComboBoxItem>
+                <ComboBoxItem>57600</ComboBoxItem><ComboBoxItem>115200</ComboBoxItem>
+                <ComboBoxItem>124800</ComboBoxItem>
+            </ComboBox>
+            <TextBlock Text="Init:" VerticalAlignment="Center" Margin="4"/>
+            <ComboBox x:Name="cmbInit" Width="105" Margin="2" SelectedIndex="0"
+                      ToolTip="Fast init (25 ms + StartCommunication) ou slow init (endereço a 5 baud).">
+                <ComboBoxItem>Fast init</ComboBoxItem><ComboBoxItem>Slow (5 baud)</ComboBoxItem>
+            </ComboBox>
+            <TextBlock Text="ECU:" VerticalAlignment="Center" Margin="4"/>
+            <TextBox x:Name="txtEcuAddr" Text="10" Width="36" ToolTip="Endereço da centralina (hex). A Thesis responde em 10."/>
+            <CheckBox x:Name="chkOnlyEcu" Content="só este" VerticalAlignment="Center" Margin="4,0"
+                      ToolTip="Tenta só o endereço indicado (sem as alternativas 10/01/11)."/>
+            <Button x:Name="btnConnect" Content="Ligar" Click="btnConnect_Click"/>
+            <Button x:Name="btnDisconnect" Content="Desligar" Click="btnDisconnect_Click" IsEnabled="False"/>
+            <TextBlock x:Name="lblStatus" Text="Desligado" VerticalAlignment="Center" Margin="10,4" Foreground="#C0A000"/>
+            <TextBlock Text="Língua:" VerticalAlignment="Center" Margin="16,4,4,4"/>
+            <ComboBox x:Name="cmbLang" Width="90" Margin="2" SelectionChanged="cmbLang_SelectionChanged">
+                <ComboBoxItem>Português</ComboBoxItem><ComboBoxItem>English</ComboBoxItem>
+            </ComboBox>
+        </WrapPanel>
+
+        <!-- Conteúdo -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0">
+                <GroupBox Header="ECU">
+                    <TextBlock x:Name="lblInfo" TextWrapping="Wrap" Text="(ligar para ler a identificação)"/>
+                </GroupBox>
+                <GroupBox Header="Ferramentas">
+                    <StackPanel>
+                        <Button x:Name="btnTest" Content="Testar acesso (sem escrever)" Click="btnTest_Click" IsEnabled="False"
+                                ToolTip="Entra na sessão 0x85 (com o baud escolhido) e faz o SecurityAccess. Não apaga nem escreve nada."/>
+                        <Button x:Name="btnDecrypt" Content="Desencriptar ficheiro do Examiner…" Click="btnDecrypt_Click"
+                                ToolTip="Abre um .BIN cifrado do Examiner (512 KB, ex.: BO010109.BIN) e grava a versão desencriptada (_dec.bin) ao lado. Não precisa de ligação à ECU."/>
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+
+            <GroupBox Grid.Column="1" Header="Flash completo por OBD (como o Examiner)">
+                <StackPanel>
+                    <Border Background="#3A2E10" BorderBrush="#C0A000" BorderThickness="1" Padding="6" Margin="0,0,0,8">
+                        <TextBlock TextWrapping="Wrap" Foreground="#F0D060"
+                                   Text="⚠ Só funciona com o imobilizador a autorizar (ECU no carro com a chave reconhecida) ou com a centralina VIRGEM. Com o imobilizador bloqueado a ECU recusa o acesso de segurança (27 → 0x22) e não deixa programar."/>
+                    </Border>
+                    <TextBlock Text="Ficheiro a gravar (.bin de 512 KB, checksums já corrigidos no WinOLS):"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Width="34" Click="btnBrowseNew_Click"/>
+                        <TextBox x:Name="txtNew" TextChanged="txtFiles_TextChanged"/>
+                    </DockPanel>
+
+                    <TextBlock x:Name="lblPlan" Text="Plano:" Margin="0,8,0,0"/>
+                    <ListBox x:Name="lstDiff" Height="170" Background="#2D2D30" Foreground="#E0E0E0" BorderBrush="#3A3D41"
+                             FontFamily="Consolas"/>
+
+                    <CheckBox x:Name="chkKeepIdent" Content="Manter a data de programação e o tester code que estão na ECU" Margin="0,8,0,0"
+                              Checked="chkKeepIdent_Changed" Unchecked="chkKeepIdent_Changed"
+                              ToolTip="A ECU obriga a escrever o tester code e a data antes de apagar. Com esta opção, o flasher lê os atuais da ECU e reescreve-os iguais."/>
+                    <StackPanel x:Name="pnlIdent" Orientation="Horizontal" Margin="0,4,0,0">
+                        <CheckBox x:Name="chkToday" Content="Data de hoje" IsChecked="True" VerticalAlignment="Center"/>
+                        <DatePicker x:Name="dateCustom" Margin="8,0" Width="130"/>
+                        <TextBlock Text="Tester:" VerticalAlignment="Center" Margin="8,0,2,0"/>
+                        <TextBox x:Name="txtTester" Width="110" MaxLength="10"
+                                 ToolTip="Tester code (até 10 caracteres). Vazio = mantém o atual (lido da ECU). A ECU obriga a escrever o tester code e a data ANTES de apagar."/>
+                    </StackPanel>
+
+                    <Button x:Name="btnFlash" Content="FLASH" Click="btnFlash_Click" Height="36" Margin="4,10,4,4"
+                            Background="#8B2E2E" FontWeight="Bold" IsEnabled="False"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+
+        <!-- Progresso -->
+        <StackPanel Grid.Row="2">
+            <ProgressBar x:Name="prog" Height="18" Margin="4" Background="#2D2D30" Foreground="#3C9A3C"/>
+            <TextBlock x:Name="lblProg" Text="" Margin="4,0"/>
+        </StackPanel>
+
+        <!-- Log -->
+        <TextBox Grid.Row="3" x:Name="txtLog" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
+                 FontFamily="Consolas" Margin="4" TextWrapping="NoWrap"/>
+    </Grid>
+</Window>

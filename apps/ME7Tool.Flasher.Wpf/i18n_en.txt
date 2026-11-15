@@ -1,0 +1,41 @@
+# Flasher — textos fixos da janela: português<TAB>inglês
+FAL ME7.3.XX Flasher	FAL ME7.3.XX Flasher
+Interface:	Interface:
+Porta:	Port:
+Atualizar portas	Refresh ports
+Baud flash:	Flash baud:
+O init é sempre a 10400. Este baud é pedido no StartDiagnosticSession 0x85; se a ECU recusar, fica a 10400.	The init is always at 10400. This baud is requested in StartDiagnosticSession 0x85; if the ECU refuses, it stays at 10400.
+Init:	Init:
+Fast init (25 ms + StartCommunication) ou slow init (endereço a 5 baud).	Fast init (25 ms + StartCommunication) or slow init (address at 5 baud).
+ECU:	ECU:
+Endereço da centralina (hex). A Thesis responde em 10.	ECU address (hex). The Thesis answers at 10.
+só este	only this
+Tenta só o endereço indicado (sem as alternativas 10/01/11).	Tries only the given address (without the 10/01/11 alternatives).
+Ligar	Connect
+Desligar	Disconnect
+Desligado	Disconnected
+ECU	ECU
+(ligar para ler a identificação)	(connect to read the identification)
+Ferramentas	Tools
+Testar acesso (sem escrever)	Test access (no writing)
+Entra na sessão 0x85 (com o baud escolhido) e faz o SecurityAccess. Não apaga nem escreve nada.	Enters session 0x85 (at the chosen baud) and does the SecurityAccess. Erases and writes nothing.
+Desencriptar ficheiro do Examiner…	Decrypt Examiner file…
+Abre um .BIN cifrado do Examiner (512 KB, ex.: BO010109.BIN) e grava a versão desencriptada (_dec.bin) ao lado. Não precisa de ligação à ECU.	Opens an encrypted Examiner .BIN (512 KB, e.g. BO010109.BIN) and saves the decrypted version (_dec.bin) next to it. No ECU connection needed.
+Flash completo por OBD (como o Examiner)	Full flash over OBD (like the Examiner)
+⚠ Só funciona com o imobilizador a autorizar (ECU no carro com a chave reconhecida) ou com a centralina VIRGEM. Com o imobilizador bloqueado a ECU recusa o acesso de segurança (27 → 0x22) e não deixa programar.	⚠ Only works with the immobilizer authorizing (ECU in the car with the key recognized) or with a VIRGIN ECU. With the immobilizer locked, the ECU refuses security access (27 → 0x22) and won't allow programming.
+Ficheiro a gravar (.bin de 512 KB, checksums já corrigidos no WinOLS):	File to write (512 KB .bin, checksums already corrected in WinOLS):
+Plano:	Plan:
+Manter a data de programação e o tester code que estão na ECU	Keep the programming date and tester code already in the ECU
+A ECU obriga a escrever o tester code e a data antes de apagar. Com esta opção, o flasher lê os atuais da ECU e reescreve-os iguais.	The ECU requires writing the tester code and date before erasing. With this option, the flasher reads the current ones from the ECU and rewrites them unchanged.
+Data de hoje	Today's date
+Tester:	Tester:
+Tester code (até 10 caracteres). Vazio = mantém o atual (lido da ECU). A ECU obriga a escrever o tester code e a data ANTES de apagar.	Tester code (up to 10 characters). Empty = keeps the current one (read from the ECU). The ECU requires writing the tester code and date BEFORE erasing.
+FLASH	FLASH
+Série	Serial
+Interface J2534 (ex.: Scanmatik 2) em K-line ISO14230: o interface faz o init e o framing.	J2534 interface (e.g. Scanmatik 2) on K-line ISO14230: the interface does the init and framing.
+Dispositivo J2534 registado no Windows	J2534 device registered in Windows
+Atualizar portas e dispositivos	Refresh ports and devices
+FTDI	FTDI
+Fast init	Fast init
+Slow (5 baud)	Slow (5 baud)
+Língua:	Language:

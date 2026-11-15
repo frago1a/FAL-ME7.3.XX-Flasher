@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$(TargetFrameworkCore)</TargetFramework>
+    <RootNamespace>ME7Tool.Core</RootNamespace>
+    <AssemblyName>ME7Tool.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

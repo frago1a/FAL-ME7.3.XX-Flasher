@@ -1,0 +1,23 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+*.suo
+
+# Rider / VS
+.idea/
+*.DotSettings.user
+
+# Build output
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+
+# Ficheiros de ECU grandes / binários de trabalho (manter fora do repo)
+*.bin
+*.ori
+*.orig
+
+# Textos extraídos das specs (reconstruíveis a partir dos PDFs)
+fiat_docs/
