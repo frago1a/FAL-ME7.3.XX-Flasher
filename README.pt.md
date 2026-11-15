@@ -27,9 +27,14 @@ Bosch ME7.3.1 da Fiat, Alfa Romeo e Lancia — validado numa Lancia Thesis e igu
 (Thesis 2.4/3.2, Stilo 1.2/1.4, Alfa 147 2.0/GTA 3.2). Ver o [docs/FLASHING.pt.md](docs/FLASHING.pt.md) para
 como funciona e o que foi testado.
 
+## Download
+
+Descarrega a última versão em [Releases](https://github.com/frago1a/FAL-ME7.3.XX-Flasher/releases): descomprime e
+corre o `FAL-ME7.3.XX-Flasher.exe`. É autónomo — não é preciso instalar o .NET.
+
 ## Requisitos
 
-- Windows, **.NET 10 Desktop Runtime (x86)** — a app é x86 porque os drivers J2534 são de 32 bits.
+- Windows (build x86, porque os drivers J2534 são de 32 bits). Compilar a partir do código precisa do .NET 10 SDK.
 - Ignição ligada, **motor parado**, bateria estável (recomenda-se um carregador).
 - Imobilizador a autorizar (a chave do carro na ignição) **ou** uma ECU virgem.
 - Uma imagem de 512 KB da mesma família de ECU.
