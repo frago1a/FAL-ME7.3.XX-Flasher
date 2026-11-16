@@ -140,14 +140,15 @@ public sealed class Flasher
     /// ATENÇÃO: se falhar depois do apagar, a ECU fica sem aplicação (recuperação por BSL).
     /// </summary>
     public void ProgramFiatFull(byte[] image, byte[]? key = null, DateTime? programmingDate = null, string? testerCode = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, FiatFlashProfile? profile = null)
     {
+        var prof = profile ?? FiatFlashProfile.Me731;
         ValidateImage(image);
-        var prepared = FiatFullFlash.Prepare(image);
-        ushort cs = FiatFullFlash.Checksum(prepared);
+        var prepared = prof.Prepare(image);
+        ushort cs = prof.ChecksumOf(prepared);
         var cipher = new FiatCipher(key);
-        Log(T($"Flash completo Fiat: {FiatFullFlash.Size / 1024} KB cifrados, chave {Convert.ToHexString(cipher.Key.ToArray())}, checksum 0x{cs:X4}.",
-              $"Fiat full flash: {FiatFullFlash.Size / 1024} KB encrypted, key {Convert.ToHexString(cipher.Key.ToArray())}, checksum 0x{cs:X4}."));
+        Log(T($"Flash completo Fiat {prof.Name}: {prepared.Length / 1024} KB cifrados em 0x{prof.DownloadStart:X6}, chave {Convert.ToHexString(cipher.Key.ToArray())}, checksum 0x{cs:X4}.",
+              $"Fiat full flash {prof.Name}: {prepared.Length / 1024} KB encrypted at 0x{prof.DownloadStart:X6}, key {Convert.ToHexString(cipher.Key.ToArray())}, checksum 0x{cs:X4}."));
 
         _date = programmingDate; _tester = testerCode; _ct = ct; _image = image;
         EnterProgramming();
@@ -157,47 +158,49 @@ public sealed class Flasher
         if (firstErase && _opt.TwoStepKeyCycle && !_keyCycleDone) KeyCycleBetweenSteps(ct);
         else if (firstErase && _opt.IgnitionOffHandover && !_handoverDone) AskIgnitionOff(ct);
 
-        const long total = FiatFullFlash.Size;
+        long total = prepared.Length;
+        string eraseRange = $"0x{prof.EraseStart:X6}–0x{prof.EraseEnd:X6}";
         ct.ThrowIfCancellationRequested();
-        Report(FlashPhase.Erasing, 0, total, T("A apagar a flash toda (o programador apaga dados, código e arranque)...",
-                                               "Erasing the whole flash (the programmer erases data, code and boot)..."));
+        Report(FlashPhase.Erasing, 0, total, prof.HasBackupZone
+            ? T("A apagar a flash toda (o programador apaga dados, código e arranque)...", "Erasing the whole flash (the programmer erases data, code and boot)...")
+            : T($"A apagar {eraseRange} (o arranque/programador fica intacto)...", $"Erasing {eraseRange} (the boot/programmer stays intact)..."));
         int savedTimeout = _opt.RoutineTimeoutMs;
-        _opt.RoutineTimeoutMs = Math.Max(savedTimeout, 180_000); // 512 KB de apagar
+        _opt.RoutineTimeoutMs = Math.Max(savedTimeout, 180_000); // apagar é lento
         try
         {
-            var res = RunRoutine(0x02, Addr3(FiatFullFlash.Start).Concat(Addr3(FiatFullFlash.StopInclusive)).ToArray(), T("apagar tudo", "erase all"));
-            Log(T($"Apagar 0x800000–0x87FFFF: concluído{ResultText(res)}. A partir daqui a ECU não tem aplicação até acabar.",
-                  $"Erase 0x800000–0x87FFFF: done{ResultText(res)}. From here on the ECU has no application until it finishes."));
+            var res = RunRoutine(0x02, Addr3(prof.EraseStart).Concat(Addr3(prof.EraseEnd)).ToArray(), T("apagar", "erase"));
+            Log(T($"Apagar {eraseRange}: concluído{ResultText(res)}. A partir daqui a ECU não tem aplicação até acabar.",
+                  $"Erase {eraseRange}: done{ResultText(res)}. From here on the ECU has no application until it finishes."));
         }
         finally { _opt.RoutineTimeoutMs = savedTimeout; }
 
-        Report(FlashPhase.Writing, 0, total, T("A escrever 512 KB (cifrados)...", "Writing 512 KB (encrypted)..."));
-        var dlReq = Addr3(FiatFullFlash.Start).Append(FiatFullFlash.DataFormat).Concat(Addr3(FiatFullFlash.Size)).ToArray();
-        var dl = _kwp.SendService(Kwp2000Service.RequestDownload, dlReq); // 34 80 00 00 01 08 00 00
+        Report(FlashPhase.Writing, 0, total, T($"A escrever {total / 1024} KB (cifrados)...", $"Writing {total / 1024} KB (encrypted)..."));
+        var dlReq = Addr3(prof.DownloadStart).Append(FiatFlashProfile.DataFormat).Concat(Addr3((uint)prepared.Length)).ToArray();
+        var dl = _kwp.SendService(Kwp2000Service.RequestDownload, dlReq); // 34 <addr> 01 <size>
         int block = BlockSizeFrom(dl);
-        Log(T($"RequestDownload 0x800000 (512 KB, formato 0x01): blocos de {block} bytes",
-              $"RequestDownload 0x800000 (512 KB, format 0x01): {block}-byte blocks") +
+        Log(T($"RequestDownload 0x{prof.DownloadStart:X6} ({total / 1024} KB, formato 0x01): blocos de {block} bytes",
+              $"RequestDownload 0x{prof.DownloadStart:X6} ({total / 1024} KB, format 0x01): {block}-byte blocks") +
             (dl.Data.Length >= 2 ? $" (ECU: maxNumberOfBlockLength {dl.Data[1]})." : "."));
         if (_opt.DownloadSettleMs > 0) Thread.Sleep(_opt.DownloadSettleMs);
 
         cipher.Reset(); // o programador reinicia o estado no 34
         var buf = new byte[block];
         int sent = 0;
-        while (sent < FiatFullFlash.Size)
+        while (sent < prepared.Length)
         {
             ct.ThrowIfCancellationRequested();
-            int chunk = Math.Min(block, FiatFullFlash.Size - sent);
+            int chunk = Math.Min(block, prepared.Length - sent);
             cipher.Encrypt(prepared.AsSpan(sent, chunk), buf.AsSpan(0, chunk));
             TransferData(buf.AsSpan(0, chunk), 0); // repetir após 0x21/0x23 manda os mesmos bytes cifrados
             sent += chunk;
-            Report(FlashPhase.Writing, sent, total, T("A escrever 512 KB (cifrados)", "Writing 512 KB (encrypted)"));
+            Report(FlashPhase.Writing, sent, total, T($"A escrever {total / 1024} KB (cifrados)", $"Writing {total / 1024} KB (encrypted)"));
         }
         _kwp.SendService(Kwp2000Service.RequestTransferExit);
 
         Report(FlashPhase.Verifying, total, total, T($"A verificar (checksum 0x{cs:X4})...", $"Verifying (checksum 0x{cs:X4})..."));
         try
         {
-            var p = Addr3(FiatFullFlash.Start).Concat(Addr3(FiatFullFlash.StopInclusive)).Concat(new[] { (byte)(cs >> 8), (byte)cs }).ToArray();
+            var p = Addr3(prof.EraseStart).Concat(Addr3(prof.EraseEnd)).Concat(new[] { (byte)(cs >> 8), (byte)cs }).ToArray();
             var res = RunRoutine(0x01, p, "checksum");
             Log(T($"Checksum 0x{cs:X4}: ECU confirmou{ResultText(res)}.", $"Checksum 0x{cs:X4}: confirmed by the ECU{ResultText(res)}."));
         }

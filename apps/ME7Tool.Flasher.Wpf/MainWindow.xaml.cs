@@ -35,6 +35,7 @@ public partial class MainWindow : Window
         cmbLang.SelectedIndex = Lang.English ? 1 : 0;
         _loadingLang = false;
         RefreshPorts();
+        LoadSavedExaminerFolder();
     }
 
     private void cmbLang_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -153,9 +154,10 @@ public partial class MainWindow : Window
     {
         StopKeepAlive();
         try { _device?.Close(); _device?.Dispose(); } catch { }
-        _device = null; _kwp = null; _flasher = null;
+        _device = null; _kwp = null; _flasher = null; _ecuIdent = null;
         btnDisconnect.IsEnabled = false; btnTest.IsEnabled = false; btnFlash.IsEnabled = false;
         Status(T("Desligado", "Disconnected"));
+        UpdateMatch();
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -202,19 +204,137 @@ public partial class MainWindow : Window
         var kwp = _kwp;
         if (kwp == null) return;
         var sb = new System.Text.StringBuilder();
+        var got = new Dictionary<EcuIdentificationOption, byte[]>();
         foreach (var (opt, label) in new (EcuIdentificationOption, string)[]
         {
             (EcuIdentificationOption.FiatDrawingNumber, "Drawing"),
             (EcuIdentificationOption.EcuHardwareNumber, "Hardware"),
             (EcuIdentificationOption.EcuSoftwareNumber, "Software"),
+            (EcuIdentificationOption.EcuSoftwareVersion, T("Versão SW", "SW version")),
             (EcuIdentificationOption.TesterCode, "Tester"),
             (EcuIdentificationOption.ProgrammingDate, T("Data prog.", "Prog. date")),
         })
         {
-            try { var d = await Task.Run(() => { lock (_ioLock) return kwp.ReadEcuIdentification(opt); }); sb.AppendLine($"{label}: {Ascii(d)}"); }
+            try
+            {
+                var d = await Task.Run(() => { lock (_ioLock) return kwp.ReadEcuIdentification(opt); });
+                got[opt] = d;
+                sb.AppendLine($"{label}: {(opt == EcuIdentificationOption.EcuSoftwareVersion ? Convert.ToHexString(d) : Ascii(d))}");
+            }
             catch (Exception ex) { sb.AppendLine(T($"{label}: (erro {ex.Message})", $"{label}: (error {ex.Message})")); }
         }
         lblInfo.Text = sb.ToString();
+
+        // identificação para procurar o original no Examiner (só com hardware e software legíveis)
+        string hw = got.TryGetValue(EcuIdentificationOption.EcuHardwareNumber, out var h) ? Ascii(h) : "";
+        string sw = got.TryGetValue(EcuIdentificationOption.EcuSoftwareNumber, out var s) ? Ascii(s) : "";
+        _ecuIdent = hw.Length > 0 && sw.Length > 0
+            ? new EcuIdent(hw, sw, got.GetValueOrDefault(EcuIdentificationOption.EcuSoftwareVersion),
+                           got.TryGetValue(EcuIdentificationOption.FiatDrawingNumber, out var f) ? Ascii(f) : null)
+            : null;
+        UpdateMatch();
+    }
+
+    // ------------------------------------------------- originais do Examiner
+
+    private EcuIdent? _ecuIdent;
+    private ExaminerLibrary? _examiner;
+    private ExaminerMatch? _match;
+
+    /// <summary>Pasta do Examiner lembrada entre arranques.</summary>
+    private static string ExaminerSettingFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ME7Tool", "flasher_examiner.txt");
+
+    private void LoadSavedExaminerFolder()
+    {
+        try
+        {
+            if (File.Exists(ExaminerSettingFile) && File.ReadAllText(ExaminerSettingFile).Trim() is { Length: > 0 } dir && Directory.Exists(dir))
+                LoadExaminer(dir, save: false);
+        }
+        catch { /* sem pasta lembrada */ }
+    }
+
+    private void btnExaminerFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog
+        {
+            Title = T("Pasta do Examiner (com o Global.ndb)", "Examiner folder (with Global.ndb)"),
+            InitialDirectory = _examiner?.Folder ?? "",
+        };
+        if (dlg.ShowDialog() == true) LoadExaminer(dlg.FolderName, save: true);
+    }
+
+    private void LoadExaminer(string folder, bool save)
+    {
+        try
+        {
+            _examiner = ExaminerLibrary.Load(folder);
+            int me7 = _examiner.Records.Select(r => r.File).Distinct().Count(n => _examiner.FindFile(n) != null);
+            lblExaminer.Text = _examiner.HasDatabase
+                ? T($"{folder}\n{_examiner.Records.Count} registos no Global.ndb, {me7} ficheiros presentes.",
+                    $"{folder}\n{_examiner.Records.Count} records in Global.ndb, {me7} files present.")
+                : T($"{folder}\nSem Global.ndb: procura pela identificação dentro de cada ficheiro.",
+                    $"{folder}\nNo Global.ndb: searches the identification inside each file.");
+            Log(T($"Examiner: {folder} ({_examiner.Records.Count} registos).", $"Examiner: {folder} ({_examiner.Records.Count} records)."));
+            if (save)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ExaminerSettingFile)!);
+                File.WriteAllText(ExaminerSettingFile, folder);
+            }
+        }
+        catch (Exception ex)
+        {
+            _examiner = null;
+            lblExaminer.Text = T($"Erro a ler a pasta: {ex.Message}", $"Error reading the folder: {ex.Message}");
+        }
+        UpdateMatch();
+    }
+
+    /// <summary>Procura a ECU ligada na pasta do Examiner e mostra o resultado.</summary>
+    private void UpdateMatch()
+    {
+        _match = null;
+        btnUseOriginal.IsEnabled = false;
+        btnSearchOriginal.IsEnabled = _examiner != null;
+        if (_examiner == null) { lblMatch.Text = ""; return; }
+        if (_ecuIdent == null)
+        {
+            lblMatch.Text = _kwp == null ? T("Liga à ECU para a procurar pela identificação.", "Connect to the ECU to look it up by its identification.")
+                                         : T("A ECU não deu o nº Bosch e o software (0x1A): não dá para procurar.", "The ECU did not give its Bosch number and software (0x1A): cannot look it up.");
+            return;
+        }
+        try { _match = _examiner.Match(_ecuIdent); }
+        catch (Exception ex) { lblMatch.Text = T($"Erro na procura: {ex.Message}", $"Search error: {ex.Message}"); return; }
+        lblMatch.Text = _match.Message;
+        lblMatch.Foreground = new System.Windows.Media.SolidColorBrush(_match.Kind switch
+        {
+            ExaminerMatchKind.UpToDate => System.Windows.Media.Color.FromRgb(0x3C, 0x9A, 0x3C),
+            ExaminerMatchKind.UpdateAvailable => System.Windows.Media.Color.FromRgb(0x50, 0xA0, 0xE0),
+            _ => System.Windows.Media.Color.FromRgb(0xC0, 0xA0, 0x00),
+        });
+        btnUseOriginal.IsEnabled = _match.Image != null;
+        Log("Examiner: " + _match.Message);
+    }
+
+    /// <summary>Pesquisa manual (sem ECU): parte do nº Bosch da ECU ligada, se houver.</summary>
+    private void btnSearchOriginal_Click(object sender, RoutedEventArgs e)
+    {
+        if (_examiner == null) return;
+        new ExaminerSearchWindow(_examiner, path =>
+        {
+            txtNew.Text = path;
+            Log(T($"Ficheiro a gravar: original do Examiner {Path.GetFileName(path)} (pesquisa manual).",
+                  $"File to write: Examiner original {Path.GetFileName(path)} (manual search)."));
+        }, _ecuIdent?.Hardware) { Owner = this }.ShowDialog();
+    }
+
+    private void btnUseOriginal_Click(object sender, RoutedEventArgs e)
+    {
+        if (_match?.Image is not { } img) return;
+        txtNew.Text = img.Path; // o LoadImage reconhece o original cifrado e desencripta-o em memória
+        Log(T($"Ficheiro a gravar: original do Examiner {Path.GetFileName(img.Path)} ({img.Ident}).",
+              $"File to write: Examiner original {Path.GetFileName(img.Path)} ({img.Ident})."));
     }
 
     private static string Ascii(byte[] d)
@@ -234,25 +354,70 @@ public partial class MainWindow : Window
     private void txtFiles_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => UpdatePlan();
 
     /// <summary>Lê e valida o ficheiro a gravar (null + motivo se não serve).</summary>
-    private byte[]? LoadImage(out string? error)
+    private byte[]? LoadImage(out string? error) => LoadImage(out error, out _, out _);
+
+    /// <summary>
+    /// Imagem de 512 KB a gravar, mais o perfil (ME7.3.1/ME3.1). Aceita um original do Examiner (cifrado, com
+    /// .Prm — 512 KB ME7.3.1 ou 496 KB ME3.1, desencriptado em memória e confirmado pelo CRC) ou um ficheiro
+    /// próprio já desencriptado de 512 KB.
+    /// </summary>
+    private byte[]? LoadImage(out string? error, out FiatFlashProfile profile, out bool examinerOriginal)
     {
         error = null;
+        examinerOriginal = false;
+        profile = FiatFlashProfile.Me731;
         if (!File.Exists(txtNew.Text)) { error = T("Escolhe o ficheiro a gravar.", "Choose the file to write."); return null; }
+
+        // 1) original do Examiner (tem .Prm e o CRC confirma): decide o perfil e desencripta em memória
+        if (ExaminerLibrary.OpenImage(txtNew.Text, out string? openWhy) is { } orig)
+        {
+            examinerOriginal = true;
+            profile = orig.Profile;
+            return orig.Image;
+        }
+
+        // 2) ficheiro próprio: 512 KB já desencriptados
         var img = File.ReadAllBytes(txtNew.Text);
         if (img.Length != _layout.TotalSize)
         {
-            error = T($"O ficheiro tem {img.Length} bytes; esperado {_layout.TotalSize} (512 KB).",
-                      $"The file has {img.Length} bytes; expected {_layout.TotalSize} (512 KB).");
+            error = openWhy != null
+                ? T($"Não dá para usar este ficheiro: {openWhy}.", $"Cannot use this file: {openWhy}.")
+                : T($"O ficheiro tem {img.Length} bytes; esperado {_layout.TotalSize} (512 KB) ou um original do Examiner com o .Prm.",
+                    $"The file has {img.Length} bytes; expected {_layout.TotalSize} (512 KB) or an Examiner original with its .Prm.");
             return null;
         }
         if (FiatFullFlash.Identify(img) == null && FiatFullFlash.Identify(FiatCipher.DecryptAll(img)) != null)
         {
-            error = T("Este ficheiro está CIFRADO (Examiner). Desencripta-o primeiro (botão à esquerda) e grava o _dec.bin.",
-                      "This file is ENCRYPTED (Examiner). Decrypt it first (button on the left) and write the _dec.bin.");
+            error = T("Este ficheiro está CIFRADO (Examiner) e não deu para o confirmar (falta o .Prm ao lado). Desencripta-o primeiro (botão à esquerda) e grava o _dec.bin.",
+                      "This file is ENCRYPTED (Examiner) and could not be confirmed (its .Prm is missing). Decrypt it first (button on the left) and write the _dec.bin.");
             return null;
         }
+        profile = FiatFlashProfile.Detect(img) ?? FiatFlashProfile.Me731;
         return img;
     }
+
+    /// <summary>Linhas do plano que comparam a identificação do ficheiro com a da ECU ligada.</summary>
+    private IEnumerable<string> CompareWithEcu(byte[] img, FiatFlashProfile profile, bool examinerOriginal)
+    {
+        var file = EcuIdent.FromImage(img);
+        yield return examinerOriginal
+            ? T($"Origem: original do Examiner ({Path.GetFileName(txtNew.Text)}) · perfil {profile.Name}, desencriptado em memória, CRC do .Prm confirmado",
+                $"Source: Examiner original ({Path.GetFileName(txtNew.Text)}) · {profile.Name} profile, decrypted in memory, .Prm CRC confirmed")
+            : T($"Origem: ficheiro próprio · perfil {profile.Name}", $"Source: own file · {profile.Name} profile");
+        if (file == null) { yield return T("⚠ O ficheiro não tem bloco de identificação Bosch.", "⚠ The file has no Bosch identification block."); yield break; }
+        yield return T($"Ficheiro: {file}", $"File: {file}");
+        if (_ecuIdent == null) yield break;
+        yield return T($"ECU:      {_ecuIdent}", $"ECU:      {_ecuIdent}");
+        if (!file.SameHardware(_ecuIdent))
+            yield return T($"⚠ HARDWARE DIFERENTE: o ficheiro é para o {file.Hardware}, a ECU é {_ecuIdent.Hardware}.",
+                           $"⚠ DIFFERENT HARDWARE: the file is for {file.Hardware}, the ECU is {_ecuIdent.Hardware}.");
+        else if (file.SameSoftware(_ecuIdent))
+            yield return T("ⓘ A ECU já tem este número de software.", "ⓘ The ECU already has this software number.");
+    }
+
+    /// <summary>true se a ECU ligada tem outro hardware que o ficheiro.</summary>
+    private bool HardwareMismatch(byte[] img) =>
+        _ecuIdent != null && EcuIdent.FromImage(img) is { } f && !f.SameHardware(_ecuIdent);
 
     /// <summary>Chave do programador da Fiat: lida do ficheiro (é a mesma na Thesis, Stilo e Alfa) ou a conhecida.</summary>
     private static byte[] FiatKey(byte[]? image, out string source)
@@ -270,23 +435,35 @@ public partial class MainWindow : Window
     {
         if (lstDiff == null) return;
         lstDiff.Items.Clear();
-        var img = LoadImage(out var err);
+        var img = LoadImage(out var err, out var prof, out bool original);
         if (img == null) { lblPlan.Text = T("Plano:", "Plan:"); if (err != null) lstDiff.Items.Add(err); btnFlash.IsEnabled = false; return; }
 
         var key = FiatKey(img, out var keySrc);
-        ushort cs = FiatFullFlash.Checksum(FiatFullFlash.Prepare(img));
-        lblPlan.Text = T($"Plano: flash completo, 512 KB cifrados · estimativa {Estimate(img.Length)}",
-                         $"Plan: full flash, 512 KB encrypted · estimate {Estimate(img.Length)}");
-        lstDiff.Items.Add(T($"Ficheiro: {FiatFullFlash.Identify(img) ?? "(sem identificação Bosch)"}",
-                            $"File: {FiatFullFlash.Identify(img) ?? "(no Bosch identification)"}"));
+        var prepared = prof.Prepare(img);
+        ushort cs = prof.ChecksumOf(prepared);
+        string a0 = $"{prof.EraseStart:X6}".Insert(4, " ").Insert(2, " "); // "80 00 00"
+        string a1 = $"{prof.EraseEnd:X6}".Insert(4, " ").Insert(2, " ");
+        string sz = $"{prepared.Length:X6}".Insert(4, " ").Insert(2, " ");
+        lblPlan.Text = T($"Plano: flash {prof.Name}, {prepared.Length / 1024} KB cifrados em 0x{prof.DownloadStart:X6} · estimativa {Estimate(prepared.Length)}",
+                         $"Plan: {prof.Name} flash, {prepared.Length / 1024} KB encrypted at 0x{prof.DownloadStart:X6} · estimate {Estimate(prepared.Length)}");
+        foreach (var line in CompareWithEcu(img, prof, original)) lstDiff.Items.Add(line);
         lstDiff.Items.Add(T("1. tester code + data de programação (a ECU exige-os)", "1. tester code + programming date (required by the ECU)"));
-        lstDiff.Items.Add(T("2. 31 02 80 00 00 87 FF FF  apagar tudo (dados, código, arranque)", "2. 31 02 80 00 00 87 FF FF  erase everything (data, code, boot)"));
-        lstDiff.Items.Add(T("3. 34 80 00 00 01 08 00 00  download único, cifrado", "3. 34 80 00 00 01 08 00 00  single encrypted download"));
-        lstDiff.Items.Add(T($"4. 31 01 80 00 00 87 FF FF {cs >> 8:X2} {cs & 0xFF:X2}  verificação (CRC-32 >> 16)",
-                            $"4. 31 01 80 00 00 87 FF FF {cs >> 8:X2} {cs & 0xFF:X2}  verification (CRC-32 >> 16)"));
+        lstDiff.Items.Add(prof.HasBackupZone
+            ? T($"2. 31 02 {a0} {a1}  apagar tudo (dados, código, arranque)", $"2. 31 02 {a0} {a1}  erase everything (data, code, boot)")
+            : T($"2. 31 02 {a0} {a1}  apagar (o arranque/programador fica intacto)", $"2. 31 02 {a0} {a1}  erase (boot/programmer stays intact)"));
+        lstDiff.Items.Add(T($"3. 34 {a0} 01 {sz}  download único, cifrado", $"3. 34 {a0} 01 {sz}  single encrypted download"));
+        lstDiff.Items.Add(T($"4. 31 01 {a0} {a1} {cs >> 8:X2} {cs & 0xFF:X2}  verificação (CRC-32 {(prof.Checksum == CrcHalf.High ? ">> 16" : "& FFFF")})",
+                            $"4. 31 01 {a0} {a1} {cs >> 8:X2} {cs & 0xFF:X2}  verification (CRC-32 {(prof.Checksum == CrcHalf.High ? ">> 16" : "& FFFF")})"));
         lstDiff.Items.Add(T($"ⓘ Chave: {Convert.ToHexString(key)} ({keySrc})", $"ⓘ Key: {Convert.ToHexString(key)} ({keySrc})"));
-        lstDiff.Items.Add(T("ⓘ Zona 0x38000–0x3FFFF enviada em branco, como o Examiner (a ECU gere o backup).",
-                            "ⓘ Area 0x38000–0x3FFFF sent blank, like the Examiner (the ECU manages the backup)."));
+        if (RamWriteUnlock.Find(img) is { } unlock)
+            lstDiff.Items.Add(unlock.Unlocked
+                ? T($"ⓘ 0x3D: ativo (byte 0x{unlock.Address:X6} = 01) — confirma que corrigiste as checksums no WinOLS",
+                    $"ⓘ 0x3D: enabled (byte 0x{unlock.Address:X6} = 01) — make sure you corrected the checksums in WinOLS")
+                : T($"ⓘ 0x3D: bloqueado de fábrica (byte 0x{unlock.Address:X6} = 00); para o logging por rotina: Ferramentas → Ativar escrita de RAM",
+                    $"ⓘ 0x3D: locked from factory (byte 0x{unlock.Address:X6} = 00); for routine logging: Tools → Enable RAM writing"));
+        if (prof.HasBackupZone)
+            lstDiff.Items.Add(T("ⓘ Zona 0x38000–0x3FFFF enviada em branco, como o Examiner (a ECU gere o backup).",
+                                "ⓘ Area 0x38000–0x3FFFF sent blank, like the Examiner (the ECU manages the backup)."));
         btnFlash.IsEnabled = _kwp != null && !_busy;
     }
 
@@ -339,28 +516,43 @@ public partial class MainWindow : Window
     private async void btnFlash_Click(object sender, RoutedEventArgs e)
     {
         var flasher = _flasher;
-        var img = LoadImage(out var err);
+        var img = LoadImage(out var err, out var prof, out _);
         if (flasher == null || img == null) { Log(err ?? T("Liga primeiro.", "Connect first.")); return; }
 
         DateTime date = (chkToday.IsChecked == true ? DateTime.Today : dateCustom.SelectedDate) ?? DateTime.Today;
         string? tester = string.IsNullOrWhiteSpace(txtTester.Text) ? null : txtTester.Text.Trim();
         var key = FiatKey(img, out var keySrc);
+        int kb = prof.PayloadSize / 1024;
         bool keep = chkKeepIdent.IsChecked == true;
         string ident = keep
             ? T("Tester code e data: mantém os que estão na ECU.\n", "Tester code and date: keeps the ones already in the ECU.\n")
             : T($"Tester code {(tester != null ? $"\"{tester}\"" : "(mantém o atual)")} e data {date:yyyy-MM-dd}.\n",
                 $"Tester code {(tester != null ? $"\"{tester}\"" : "(keeps the current one)")} and date {date:yyyy-MM-dd}.\n");
 
+        string fileId = EcuIdent.FromImage(img)?.ToString() ?? FiatFullFlash.Identify(img) ?? "";
+        string hwWarn = HardwareMismatch(img)
+            ? T($"⚠⚠ HARDWARE DIFERENTE: o ficheiro NÃO é para esta ECU (ECU {_ecuIdent!.Hardware}). Só continua se sabes o que estás a fazer.\n\n",
+                $"⚠⚠ DIFFERENT HARDWARE: the file is NOT for this ECU (ECU {_ecuIdent!.Hardware}). Only continue if you know what you are doing.\n\n")
+            : "";
+        string eraseDesc = prof.HasBackupZone
+            ? T("A ECU vai APAGAR A FLASH TODA (incluindo o arranque) e escrever o ficheiro inteiro.\n",
+                "The ECU will ERASE THE WHOLE FLASH (including the boot) and write the entire file.\n")
+            : T($"A ECU vai APAGAR 0x{prof.EraseStart:X6}–0x{prof.EraseEnd:X6} (o arranque/programador fica intacto) e escrever {kb} KB.\n",
+                $"The ECU will ERASE 0x{prof.EraseStart:X6}–0x{prof.EraseEnd:X6} (boot/programmer stays intact) and write {kb} KB.\n");
+        string expWarn = prof == FiatFlashProfile.Me31
+            ? T("⚠ ME3.1 EXPERIMENTAL: o procedimento foi confirmado no firmware e é igual byte a byte ao do Examiner, mas ainda NUNCA correu numa ECU real. Faz o primeiro em bancada, com backup e BSL à mão.\n\n",
+                "⚠ ME3.1 EXPERIMENTAL: the procedure was confirmed in the firmware and is byte-identical to the Examiner's, but it has NEVER run on a real ECU yet. Do the first one on the bench, with a backup and BSL at hand.\n\n")
+            : "";
         var ok = MessageBox.Show(
-            T($"FLASH COMPLETO (OBD, cifrado): {Path.GetFileName(txtNew.Text)}\n{FiatFullFlash.Identify(img)}\n512 KB, estimativa {Estimate(img.Length)}.\n\n",
-              $"FULL FLASH (OBD, encrypted): {Path.GetFileName(txtNew.Text)}\n{FiatFullFlash.Identify(img)}\n512 KB, estimate {Estimate(img.Length)}.\n\n") +
+            hwWarn + expWarn +
+            T($"FLASH {prof.Name} (OBD, cifrado): {Path.GetFileName(txtNew.Text)}\n{fileId}\n{kb} KB, estimativa {Estimate(prof.PayloadSize)}.\n\n",
+              $"{prof.Name} FLASH (OBD, encrypted): {Path.GetFileName(txtNew.Text)}\n{fileId}\n{kb} KB, estimate {Estimate(prof.PayloadSize)}.\n\n") +
             ident +
             T($"Chave: {Convert.ToHexString(key)} ({keySrc}).\n\n", $"Key: {Convert.ToHexString(key)} ({keySrc}).\n\n") +
-            T("A ECU vai APAGAR A FLASH TODA (incluindo os sectores de arranque) e escrever o ficheiro inteiro.\n" +
-              "Se falhar depois de apagar, a ECU fica sem aplicação e só recupera por BSL.\n\n" +
+            eraseDesc +
+            T("Se falhar depois de apagar, a ECU fica sem aplicação e só recupera por BSL.\n\n" +
               "Requisito: imobilizador a autorizar (chave reconhecida) ou centralina virgem.\n\n" +
               "Alimentação estável, não desligar nada. Continuar?",
-              "The ECU will ERASE THE WHOLE FLASH (including the boot sectors) and write the entire file.\n" +
               "If it fails after erasing, the ECU is left without an application and can only be recovered by BSL.\n\n" +
               "Requirement: immobilizer authorizing (key recognized) or virgin ECU.\n\n" +
               "Stable power supply, don't disconnect anything. Continue?"),
@@ -368,11 +560,72 @@ public partial class MainWindow : Window
         if (ok != MessageBoxResult.Yes) return;
 
         ApplyOptions(flasher);
-        bool done = await RunBusy("Flash", () => flasher.ProgramFiatFull(img, key, date, tester));
+        bool done = await RunBusy("Flash", () => flasher.ProgramFiatFull(img, key, date, tester, profile: prof));
         if (done)
             MessageBox.Show(T("Flash concluído e checksum confirmada.\nDesliga e volta a ligar a ignição para a ECU arrancar o software novo.",
                               "Flash complete and checksum confirmed.\nTurn the ignition off and on again so the ECU starts the new software."),
                 "OK", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>
+    /// Ferramentas → ativar o 0x3D: grava uma cópia ME7.3.1 com o byte de desbloqueio a 1 (não precisa de ECU).
+    /// As checksums da Bosch ficam por corrigir — tem de ser no WinOLS antes de gravar.
+    /// </summary>
+    private void btnUnlock3D_Click(object sender, RoutedEventArgs e)
+    {
+        var open = new OpenFileDialog
+        {
+            Title = T("Ficheiro ME7.3.1 (512 KB, desencriptado ou original do Examiner)", "ME7.3.1 file (512 KB, decrypted or Examiner original)"),
+            Filter = T("Binário ECU (*.bin;*.ori)|*.bin;*.ori|Todos|*.*", "ECU binary (*.bin;*.ori)|*.bin;*.ori|All|*.*"),
+            FileName = File.Exists(txtNew.Text) ? Path.GetFileName(txtNew.Text) : "",
+            InitialDirectory = File.Exists(txtNew.Text) ? Path.GetDirectoryName(txtNew.Text) : "",
+        };
+        if (open.ShowDialog() != true) return;
+        try
+        {
+            // original do Examiner (cifrado, com .Prm) ou ficheiro já desencriptado
+            byte[] img = ExaminerLibrary.OpenImage(open.FileName, out _) is { } orig ? orig.Image : File.ReadAllBytes(open.FileName);
+            var info = RamWriteUnlock.Find(img);
+            if (info == null)
+            {
+                MessageBox.Show(this,
+                    T("Este ficheiro não tem a porta do 0x3D que o flasher sabe ativar.\n\nSó existe nos softwares ME7.3.1 1037… (Thesis, Stilo, …). Os 1277… antigos (ex.: Alfa 147) e a ME3.1 não a têm.",
+                      "This file does not have the 0x3D gate the flasher can enable.\n\nIt only exists in ME7.3.1 1037… software (Thesis, Stilo, …). The older 1277… ones (e.g. Alfa 147) and the ME3.1 do not have it."),
+                    "0x3D", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (info.Unlocked)
+            {
+                MessageBox.Show(this, T($"O 0x3D já está desbloqueado neste ficheiro (byte 0x{info.Address:X6} = 01). Nada a fazer.",
+                                        $"0x3D is already enabled in this file (byte 0x{info.Address:X6} = 01). Nothing to do."),
+                    "0x3D", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var patched = RamWriteUnlock.Apply(img, out _);
+            var save = new SaveFileDialog
+            {
+                Title = T("Guardar o ficheiro com o 0x3D ativo", "Save the file with 0x3D enabled"),
+                Filter = T("Binário ECU (*.bin)|*.bin", "ECU binary (*.bin)|*.bin"),
+                InitialDirectory = Path.GetDirectoryName(open.FileName),
+                FileName = Path.GetFileNameWithoutExtension(open.FileName) + "_0x3D.bin",
+            };
+            if (save.ShowDialog() != true) return;
+            File.WriteAllBytes(save.FileName, patched);
+            Log(T($"0x3D: byte 0x{info.Address:X6} (ficheiro 0x{info.FileOffset:X5}) 00 → 01 → {save.FileName}. Checksums POR CORRIGIR.",
+                  $"0x3D: byte 0x{info.Address:X6} (file 0x{info.FileOffset:X5}) 00 → 01 → {save.FileName}. Checksums NOT corrected."));
+            MessageBox.Show(this,
+                T($"Gravado: {save.FileName}\nByte 0x{info.Address:X6} (offset 0x{info.FileOffset:X5} no ficheiro): 00 → 01.\n\n" +
+                  "⚠ CORRIGE AS CHECKSUMS NO WINOLS ANTES DE GRAVAR NA ECU.\n" +
+                  "O byte fica na calibração, coberta pelas checksums da Bosch, e o flasher não as corrige. " +
+                  "Sem a correção, a ECU deteta a calibração alterada (avaria / pode não arrancar).",
+                  $"Saved: {save.FileName}\nByte 0x{info.Address:X6} (file offset 0x{info.FileOffset:X5}): 00 → 01.\n\n" +
+                  "⚠ CORRECT THE CHECKSUMS IN WINOLS BEFORE FLASHING THE ECU.\n" +
+                  "The byte is in the calibration, covered by the Bosch checksums, and the flasher does not correct them. " +
+                  "Without the correction the ECU detects the changed calibration (fault / may not start)."),
+                T("0x3D ativado — corrigir checksums", "0x3D enabled — correct checksums"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex) { Log(T($"ERRO 0x3D: {ex.Message}", $"ERROR 0x3D: {ex.Message}")); }
     }
 
     /// <summary>Desencripta um .BIN do Examiner e grava _dec.bin ao lado (não precisa de ECU).</summary>

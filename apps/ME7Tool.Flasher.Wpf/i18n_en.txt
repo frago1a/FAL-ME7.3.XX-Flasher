@@ -39,3 +39,13 @@ FTDI	FTDI
 Fast init	Fast init
 Slow (5 baud)	Slow (5 baud)
 Língua:	Language:
+Ficheiros originais (Examiner)	Original files (Examiner)
+Pasta do Examiner…	Examiner folder…
+Escolhe a pasta completa do Examiner (com o Global.ndb). Depois de ligar, o flasher procura a ECU pela identificação (nº Bosch e software) e diz se há um original mais recente.	Choose the complete Examiner folder (with Global.ndb). After connecting, the flasher looks the ECU up by its identification (Bosch number and software) and tells you if there is a newer original.
+(nenhuma pasta escolhida)	(no folder chosen)
+Usar o ficheiro original	Use the original file
+Põe o original do Examiner como ficheiro a gravar (desencriptado em memória, CRC confirmado com o .Prm). Para gravar um ficheiro teu, usa o botão … do lado direito.	Sets the Examiner original as the file to write (decrypted in memory, CRC confirmed with the .Prm). To write your own file, use the … button on the right.
+Procurar por referência…	Search by reference…
+Procura um original pelo nº Bosch, software, desenho Fiat ou nome do ficheiro, sem precisar de ECU. Dá para o usar no flash ou extraí-lo desencriptado.	Searches for an original by Bosch number, software, Fiat drawing or file name, without an ECU. It can be used for flashing or extracted decrypted.
+Ativar escrita de RAM (0x3D)…	Enable RAM writing (0x3D)…
+Só ME7.3.1 (software 1037…). Encontra o byte de calibração que libera o WriteMemoryByAddress (0x3D) e grava uma cópia do ficheiro com ele a 1 (_0x3D.bin). Necessário para o logging por rotina. NÃO corrige as checksums: corrige-as no WinOLS antes de gravar.	ME7.3.1 only (1037… software). Finds the calibration byte that enables WriteMemoryByAddress (0x3D) and saves a copy of the file with it set to 1 (_0x3D.bin). Needed for routine logging. It does NOT correct the checksums: correct them in WinOLS before flashing.

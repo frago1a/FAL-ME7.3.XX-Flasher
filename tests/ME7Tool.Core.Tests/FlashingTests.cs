@@ -555,6 +555,26 @@ public class FlashingTests
     }
 
     [Fact]
+    public void ProgramFiatFull_Me31_Uses4000RangeAndLowChecksum()
+    {
+        var (flasher, _, ecu) = MakeFlasher();
+        ecu.MaxBlock = 0xFD;
+        var img = new byte[0x80000];
+        new Random(7).NextBytes(img);
+        flasher.ProgramFiatFull(img, FiatCipher.DefaultKey, new DateTime(2026, 11, 15), "TESTER",
+            profile: FiatFlashProfile.Me31);
+
+        Assert.Equal(new[] { (0x004000u, 0x07FFFFu) }, ecu.Erases);                        // 31 02 00 40 00 07 FF FF (arranque intacto)
+        Assert.Equal("340040000107C000", Convert.ToHexString(ecu.DownloadReqs[0]));        // 34 00 40 00 01 07 C0 00
+        var prepared = FiatFlashProfile.Me31.Prepare(img);                                 // = 0x4000..0x7FFFF
+        Assert.Equal(0x7C000, prepared.Length);
+        Assert.Equal(prepared, FiatCipher.DecryptAll(ecu.TransferBytes.ToArray()));
+        ushort cs = FiatFlashProfile.Me31.ChecksumOf(prepared);                            // metade de BAIXO
+        Assert.Equal((ushort)(Flasher.Crc32(prepared) & 0xFFFF), cs);
+        Assert.Equal(new byte[] { 0x00, 0x40, 0x00, 0x07, 0xFF, 0xFF, (byte)(cs >> 8), (byte)cs }, ecu.ChecksumParams);
+    }
+
+    [Fact]
     public void ProgramFiatFull_ChecksumRefused_IsAnError()
     {
         var (flasher, _, ecu) = MakeFlasher();

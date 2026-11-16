@@ -18,12 +18,21 @@ diagnostic port, the same way the Fiat factory tool does.
 - **Access test** (session + security access) that writes nothing, to check the ECU answers before erasing.
 - **Keeps the ECU identification** (tester code and programming date) unless you choose to change it.
 - **Decrypts/encrypts** Fiat workshop-tool images to and from a plain binary.
+- **Finds the original software** in a Fiat workshop-tool (Examiner) folder by the ECU identification: tells
+  whether the software is current or an update exists, and can use the original for the flash or extract it
+  decrypted. Originals can also be searched by Bosch number, software or Fiat drawing, without an ECU.
+- **ME3.1 support** (same hardware, other software, e.g. Thesis 2.4 5C / Stilo 2.4) — *experimental*: the
+  procedure is confirmed in the firmware and matches the factory tool byte for byte, but has not run on an
+  ECU yet.
+- **Enable RAM writing (0x3D)** in an ME7.3.1 image (needed for fast RAM-routine logging). It does not correct
+  the checksums — do that in WinOLS before flashing.
 - Works with an **FTDI KKL cable** or a **J2534 interface** with ISO 14230 support (e.g. Scanmatik 2).
 
 ## Supported ECUs
 
 Bosch ME7.3.1 as used by Fiat, Alfa Romeo and Lancia — validated on a Lancia Thesis and identical in firmware
-across the family (Thesis 2.4/3.2, Stilo 1.2/1.4, Alfa 147 2.0/GTA 3.2). See
+across the family (Thesis 3.2, Stilo 1.2/1.4, Alfa 147 2.0/GTA 3.2, and 2.4 versions with ME7.3.1 software).
+Bosch ME3.1 (Thesis 2.4 5C, Stilo 2.4): experimental, not yet tested on an ECU. See
 [docs/FLASHING.md](docs/FLASHING.md) for how it works and what was tested.
 
 ## Download
@@ -36,7 +45,7 @@ Get the latest build from [Releases](https://github.com/frago1a/FAL-ME7.3.XX-Fla
 - Windows (x86 build, because the J2534 drivers are 32-bit). Building from source needs the .NET 10 SDK.
 - Ignition on, **engine stopped**, stable battery (a charger is recommended).
 - The immobiliser authorising (car key in the ignition) **or** a virgin ECU.
-- A 512 KB image of the same ECU family.
+- A 512 KB image of the same ECU family (plain, BSL read or Examiner file).
 
 ## Build
 

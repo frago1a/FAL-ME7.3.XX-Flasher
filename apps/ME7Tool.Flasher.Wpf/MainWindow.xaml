@@ -91,6 +91,20 @@
                                 ToolTip="Entra na sessão 0x85 (com o baud escolhido) e faz o SecurityAccess. Não apaga nem escreve nada."/>
                         <Button x:Name="btnDecrypt" Content="Desencriptar ficheiro do Examiner…" Click="btnDecrypt_Click"
                                 ToolTip="Abre um .BIN cifrado do Examiner (512 KB, ex.: BO010109.BIN) e grava a versão desencriptada (_dec.bin) ao lado. Não precisa de ligação à ECU."/>
+                        <Button x:Name="btnUnlock3D" Content="Ativar escrita de RAM (0x3D)…" Click="btnUnlock3D_Click"
+                                ToolTip="Só ME7.3.1 (software 1037…). Encontra o byte de calibração que libera o WriteMemoryByAddress (0x3D) e grava uma cópia do ficheiro com ele a 1 (_0x3D.bin). Necessário para o logging por rotina. NÃO corrige as checksums: corrige-as no WinOLS antes de gravar."/>
+                    </StackPanel>
+                </GroupBox>
+                <GroupBox Header="Ficheiros originais (Examiner)">
+                    <StackPanel>
+                        <Button x:Name="btnExaminerFolder" Content="Pasta do Examiner…" Click="btnExaminerFolder_Click"
+                                ToolTip="Escolhe a pasta completa do Examiner (com o Global.ndb). Depois de ligar, o flasher procura a ECU pela identificação (nº Bosch e software) e diz se há um original mais recente."/>
+                        <TextBlock x:Name="lblExaminer" TextWrapping="Wrap" Foreground="#A0A0A0" Text="(nenhuma pasta escolhida)"/>
+                        <TextBlock x:Name="lblMatch" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        <Button x:Name="btnUseOriginal" Content="Usar o ficheiro original" Click="btnUseOriginal_Click" IsEnabled="False"
+                                ToolTip="Põe o original do Examiner como ficheiro a gravar (desencriptado em memória, CRC confirmado com o .Prm). Para gravar um ficheiro teu, usa o botão … do lado direito."/>
+                        <Button x:Name="btnSearchOriginal" Content="Procurar por referência…" Click="btnSearchOriginal_Click" IsEnabled="False"
+                                ToolTip="Procura um original pelo nº Bosch, software, desenho Fiat ou nome do ficheiro, sem precisar de ECU. Dá para o usar no flash ou extraí-lo desencriptado."/>
                     </StackPanel>
                 </GroupBox>
             </StackPanel>

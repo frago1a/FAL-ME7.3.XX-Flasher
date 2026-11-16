@@ -102,16 +102,66 @@ Examiner file).
 the engine software. The flasher therefore runs an **access test** (session + security access, nothing
 erased), validates the file size and checksum **before** erasing, and keeps the session alive throughout.
 
+## ME3.1 variant (same hardware, other software)
+
+Some 2.4 engines (e.g. Lancia Thesis 2.4 5C, Fiat Stilo 2.4) run **Bosch ME3.1** software on the **same
+hardware** (C167, same flash). The cipher, the key and the seed/key are the same, but the programmer is
+different, so the procedure changes. It was recovered from the firmware (Stilo dump) and checked against
+the Examiner files:
+
+| | ME7.3.1 | ME3.1 |
+|---|---|---|
+| Flash seen by the software at | `0x800000` | `0x000000` |
+| Programmer | copied from flash into RAM | lives in the boot sector `0x0000–0x3FFF` |
+| Erase | `31 02 800000 87FFFF` (everything, boot included) | `31 02 004000 07FFFF` (**boot/programmer kept**) |
+| Download | `34 800000 01 080000` (512 KB) | `34 004000 01 07C000` (496 KB) |
+| Verify | `31 01 … <cs>`, cs = CRC-32 **>> 16** | `31 01 … <cs>`, cs = CRC-32 **& 0xFFFF** |
+| Identification block | near `0x10190` | near `0x80C6` |
+
+The flasher detects the variant from the image (position of the identification block) and uses the right
+procedure. A 512 KB ME3.1 image read by BSL is accepted: only `0x4000–0x7FFFF` is sent, the boot in the file
+is ignored. The encrypted stream the flasher produces from a BSL read is byte-identical to the Examiner's
+`BO010302.BIN`, with the same checksum (`0xCDB2`).
+
+**Status: experimental.** Confirmed in the firmware and against the Examiner, but **never run on a real ECU
+yet**. Converting an ME3.1 to ME7.3.1 software over OBD is not possible (the ME3.1 programmer never writes
+the boot); that conversion is done by BSL.
+
+## Examiner originals
+
+Point the flasher at a complete Examiner folder (with `Global.ndb`). After connecting it reads the ECU
+identification (`1A 92/94/95/91`: Bosch number, software, version, Fiat drawing) and looks it up in the
+Examiner database, telling whether the software is current, whether an update exists, or whether the
+software is not in the list (e.g. modified). A file is only offered if the flasher can write it: right size,
+`.Prm` for the right flash area, and the `.Prm` checksum equal to the decrypted image's checksum (this proves
+both the key and the file). Originals can also be searched by reference (Bosch number, software, Fiat
+drawing, file name) and extracted decrypted, without an ECU.
+
+## Enabling RAM writes (0x3D)
+
+On the ME7.3.1 `WriteMemoryByAddress` (`3D`) is refused (`7F 3D 12`) in normal running: the list of
+writable areas is empty unless a **calibration byte** is set to 1 (Thesis: `0x812AA4`). With it, `3D` writes
+RAM with the engine running — which is what a RAM logging routine needs. The flasher (*Tools → Enable RAM
+writing*) finds this byte by code in any ME7.3.1 1037… software and saves a copy with it set to 1.
+
+> The byte is inside the calibration, which is covered by Bosch checksums. **The flasher does not correct
+> them**: correct the checksums (e.g. in WinOLS) before flashing the file.
+
+Older 1277… software (e.g. Alfa 147) and the ME3.1 do not have this gate.
+
 ## Validation status
 
-- Tested on a real ECU: **Lancia Thesis** (ME7.3.1), with an FTDI KKL cable and with a Scanmatik 2 (J2534).
-- Analysed in firmware and identical (same programmer, cipher, polynomial and memory layout): Thesis 2.4 /
-  3.2, Stilo 1.2 / 1.4 (ME7.3H4), Alfa 147 2.0 / GTA 3.2 — nine software versions in total.
+- Tested on a real ECU: **Lancia Thesis** (ME7.3.1), with an FTDI KKL cable and with a Scanmatik 2 (J2534),
+  including a flash with RAM writes enabled.
+- Analysed in firmware and identical (same programmer, cipher, polynomial and memory layout): Thesis 3.2,
+  Stilo 1.2 / 1.4 (ME7.3H4), Alfa 147 2.0 / GTA 3.2, and the 2.4 versions that run ME7.3.1 software.
+- ME3.1 (Thesis 2.4 5C / Stilo 2.4): procedure confirmed in firmware, **not yet tested on an ECU**.
 - The first ECU of each model should be flashed with care, with BSL recovery available.
 
 ## Requirements
 
 - Ignition on, **engine stopped**, stable battery voltage (a charger is recommended).
 - Immobiliser authorising (car key in the ignition) **or** a virgin ECU.
-- A 512 KB image of the same ECU family (plain binary or Examiner file).
+- A 512 KB image of the same ECU family (plain binary, BSL read or Examiner file; ME3.1 Examiner files are
+  496 KB).
 - K-line interface: FTDI-based KKL cable, or a J2534 interface with ISO 14230 support (32-bit driver).
