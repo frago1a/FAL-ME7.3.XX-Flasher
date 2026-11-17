@@ -68,6 +68,8 @@
             <Button x:Name="btnConnect" Content="Ligar" Click="btnConnect_Click"/>
             <Button x:Name="btnDisconnect" Content="Desligar" Click="btnDisconnect_Click" IsEnabled="False"/>
             <TextBlock x:Name="lblStatus" Text="Desligado" VerticalAlignment="Center" Margin="10,4" Foreground="#C0A000"/>
+            <TextBlock x:Name="lblBattery" VerticalAlignment="Center" Margin="0,4,10,4" Visibility="Collapsed"
+                       ToolTip="Tensão da bateria no pino 16 da ficha OBD, medida pelo interface J2534 (não pela ECU). Para programar convém ≥ 12 V, de preferência com carregador."/>
             <TextBlock Text="Língua:" VerticalAlignment="Center" Margin="16,4,4,4"/>
             <ComboBox x:Name="cmbLang" Width="90" Margin="2" SelectionChanged="cmbLang_SelectionChanged">
                 <ComboBoxItem>Português</ComboBoxItem><ComboBoxItem>English</ComboBoxItem>

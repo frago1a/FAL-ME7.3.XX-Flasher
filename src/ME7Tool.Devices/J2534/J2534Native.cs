@@ -30,7 +30,7 @@ public static class J2534Const
     public const uint CLEAR_TX_BUFFER = 7, CLEAR_RX_BUFFER = 8;
     public const uint STATUS_NOERROR = 0;
     // IOCTL
-    public const uint GET_CONFIG = 0x01, SET_CONFIG = 0x02, FIVE_BAUD_INIT = 0x04, FAST_INIT = 0x05;
+    public const uint GET_CONFIG = 0x01, SET_CONFIG = 0x02, READ_VBATT = 0x03, FIVE_BAUD_INIT = 0x04, FAST_INIT = 0x05;
     // Parâmetros de configuração (SCONFIG)
     public const uint DATA_RATE = 0x01, LOOP_BACK = 0x03, P1_MAX = 0x07, P3_MIN = 0x0A, P4_MIN = 0x0C;
     // RxStatus
@@ -210,6 +210,20 @@ public sealed class J2534Native : IDisposable
             return r;
         }
         finally { Marshal.FreeHGlobal(inp); Marshal.FreeHGlobal(outp); }
+    }
+
+    /// <summary>READ_VBATT: tensão no pino 16 da ficha OBD (mV), pedida ao dispositivo (não ao canal).</summary>
+    public uint ReadVbatt(uint deviceId, out uint millivolts)
+    {
+        IntPtr outp = Marshal.AllocHGlobal(4);
+        try
+        {
+            Marshal.WriteInt32(outp, 0);
+            uint r = _ioctl(deviceId, J2534Const.READ_VBATT, IntPtr.Zero, outp);
+            millivolts = (uint)Marshal.ReadInt32(outp);
+            return r;
+        }
+        finally { Marshal.FreeHGlobal(outp); }
     }
 
     public string GetLastError()

@@ -10,7 +10,7 @@ namespace ME7Tool.Devices;
 /// <see cref="ME7Tool.Core.Kwp2000.Kwp2000Interface"/> espera: Write recebe frames completas (com checksum,
 /// que se retira — o interface acrescenta o seu), Read devolve as respostas já com checksum e sem eco.
 /// </summary>
-public sealed class J2534KLineDevice : IKLineFrameDevice
+public sealed class J2534KLineDevice : IKLineFrameDevice, ME7Tool.Core.Transport.IBatteryMonitor
 {
     private readonly string _dllPath;
     private J2534Native? _n;
@@ -271,5 +271,14 @@ public sealed class J2534KLineDevice : IKLineFrameDevice
     {
         if (status != J2534Const.STATUS_NOERROR)
             throw new IOException(T($"{op} falhou (status={status}): {_n?.GetLastError()}", $"{op} failed (status={status}): {_n?.GetLastError()}"));
+    }
+
+    /// <summary>Tensão da bateria no pino 16 (READ_VBATT); null se fechado, recusado ou 0.</summary>
+    public double? ReadBatteryVolts()
+    {
+        var n = _n;
+        if (n == null || !IsOpen) return null;
+        try { return n.ReadVbatt(_deviceId, out uint mv) == J2534Const.STATUS_NOERROR && mv > 0 ? mv / 1000.0 : null; }
+        catch { return null; }
     }
 }

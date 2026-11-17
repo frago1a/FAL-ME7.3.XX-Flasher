@@ -135,6 +135,7 @@ public partial class MainWindow : Window
             await Task.Run(() => { lock (_ioLock) kwp.Connect(init); });
             Status(T($"Ligado (ECU 0x{_kwp.EcuAddress:X2})", $"Connected (ECU 0x{_kwp.EcuAddress:X2})"), ok: true);
             await ReadInfo();
+            await Task.Run(() => { lock (_ioLock) ReadBattery(); });
             StartKeepAlive();
             btnDisconnect.IsEnabled = true;
             btnTest.IsEnabled = true;
@@ -152,9 +153,32 @@ public partial class MainWindow : Window
         Log(T("Desligado.", "Disconnected."));
     }
 
+    /// <summary>
+    /// Lê a bateria no interface (J2534: READ_VBATT) e mostra-a. Chamar com o <c>_ioLock</c> e nunca durante o flash.
+    /// null se o interface não souber medir (FTDI/série).
+    /// </summary>
+    private double? ReadBattery()
+    {
+        double? v = (_device as IBatteryMonitor)?.ReadBatteryVolts();
+        Dispatcher.BeginInvoke(() => ShowBattery(v));
+        return v;
+    }
+
+    private void ShowBattery(double? v)
+    {
+        if (v is not double volts) { lblBattery.Visibility = Visibility.Collapsed; return; }
+        lblBattery.Visibility = Visibility.Visible;
+        lblBattery.Foreground = new System.Windows.Media.SolidColorBrush(volts < 8 ? System.Windows.Media.Color.FromRgb(0xA0, 0xA0, 0xA0)
+            : volts < BatteryLevels.FlashMin ? System.Windows.Media.Color.FromRgb(0xFF, 0x7B, 0x72)
+            : System.Windows.Media.Color.FromRgb(0x3C, 0xC0, 0x5C));
+        lblBattery.Text = volts < 8 ? T($"🔌 {volts:0.0} V (sem 12 V na ficha OBD?)", $"🔌 {volts:0.0} V (no 12 V on the OBD plug?)")
+                        : $"🔋 {volts:0.0} V" + (volts < BatteryLevels.FlashMin ? T(" fraca para programar", " too low to program") : "");
+    }
+
     private void Disconnect()
     {
         StopKeepAlive();
+        lblBattery.Visibility = Visibility.Collapsed;
         try { _device?.Close(); _device?.Dispose(); } catch { }
         _device = null; _kwp = null; _flasher = null; _ecuIdent = null;
         btnDisconnect.IsEnabled = false; btnTest.IsEnabled = false; btnFlash.IsEnabled = false;
@@ -188,7 +212,7 @@ public partial class MainWindow : Window
             {
                 try { await Task.Delay(2000, tok); } catch { break; }
                 if (_busy) continue;
-                try { lock (_ioLock) { _kwp?.TesterPresent(true); } }
+                try { lock (_ioLock) { _kwp?.TesterPresent(true); ReadBattery(); } }
                 catch (Exception ex)
                 {
                     Log(T($"Keep-alive parou: {ex.Message}", $"Keep-alive stopped: {ex.Message}"));
@@ -545,11 +569,22 @@ public partial class MainWindow : Window
             ? T("⚠ ME3.1 EXPERIMENTAL: o procedimento foi confirmado no firmware e é igual byte a byte ao do Examiner, mas ainda NUNCA correu numa ECU real. Faz o primeiro em bancada, com backup e BSL à mão.\n\n",
                 "⚠ ME3.1 EXPERIMENTAL: the procedure was confirmed in the firmware and is byte-identical to the Examiner's, but it has NEVER run on a real ECU yet. Do the first one on the bench, with a backup and BSL at hand.\n\n")
             : "";
+        double? vbat = null;
+        if (_device is IBatteryMonitor)
+            vbat = await Task.Run(() => { lock (_ioLock) return ReadBattery(); });
+        string batWarn = vbat is double vb && vb >= 8 && vb < BatteryLevels.FlashMin
+            ? T($"⚠⚠ BATERIA FRACA: {vb:0.0} V. Um flash demora minutos e a tensão desce — liga um carregador antes de continuar.\n\n",
+                $"⚠⚠ LOW BATTERY: {vb:0.0} V. A flash takes minutes and the voltage drops — connect a charger before continuing.\n\n")
+            : vbat is double vb2 && vb2 < 8
+            ? T($"⚠ O interface mede só {vb2:0.0} V no pino 16: confirma que está ligado à ficha OBD e com a ignição ligada.\n\n",
+                $"⚠ The interface only measures {vb2:0.0} V on pin 16: check it is plugged into the OBD socket with the ignition on.\n\n")
+            : "";
+        string batInfo = vbat is double vb3 && vb3 >= BatteryLevels.FlashMin ? T($"Bateria: {vb3:0.0} V.\n", $"Battery: {vb3:0.0} V.\n") : "";
         var ok = MessageBox.Show(
-            hwWarn + expWarn +
+            batWarn + hwWarn + expWarn +
             T($"FLASH {prof.Name} (OBD, cifrado): {Path.GetFileName(txtNew.Text)}\n{fileId}\n{kb} KB, estimativa {Estimate(prof.PayloadSize)}.\n\n",
               $"{prof.Name} FLASH (OBD, encrypted): {Path.GetFileName(txtNew.Text)}\n{fileId}\n{kb} KB, estimate {Estimate(prof.PayloadSize)}.\n\n") +
-            ident +
+            ident + batInfo +
             T($"Chave: {Convert.ToHexString(key)} ({keySrc}).\n\n", $"Key: {Convert.ToHexString(key)} ({keySrc}).\n\n") +
             eraseDesc +
             T("Se falhar depois de apagar, a ECU fica sem aplicação e só recupera por BSL.\n\n" +
