@@ -21,6 +21,8 @@
     <UseWPF>true</UseWPF>
     <Product>FAL ME7.3.XX Flasher</Product>
     <AssemblyTitle>FAL ME7.3.XX Flasher</AssemblyTitle>
+    <!-- Ícone do executável (Explorador, barra de tarefas, título das janelas). -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>
