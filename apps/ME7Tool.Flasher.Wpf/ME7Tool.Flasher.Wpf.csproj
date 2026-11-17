@@ -9,6 +9,8 @@
     <!-- Tradução para inglês: tradutor dos textos fixos (partilhado) + dicionário desta aplicação. -->
     <Compile Include="..\Shared\UiLocalizer.cs" Link="Shared\UiLocalizer.cs" />
     <EmbeddedResource Include="i18n_en.txt" LogicalName="i18n_en.txt" />
+    <!-- O ícone também como recurso WPF, para a janela "Sobre". -->
+    <Resource Include="app.ico" />
   </ItemGroup>
 
   <PropertyGroup>

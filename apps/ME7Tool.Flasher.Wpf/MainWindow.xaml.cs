@@ -53,6 +53,8 @@ public partial class MainWindow : Window
 
     private void btnRefresh_Click(object sender, RoutedEventArgs e) => RefreshPorts();
 
+    private void btnAbout_Click(object sender, RoutedEventArgs e) => new AboutWindow { Owner = this }.ShowDialog();
+
     private void RefreshPorts()
     {
         string prev = cmbPort.Text;

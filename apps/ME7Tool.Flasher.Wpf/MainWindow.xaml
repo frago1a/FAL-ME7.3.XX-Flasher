@@ -72,6 +72,7 @@
             <ComboBox x:Name="cmbLang" Width="90" Margin="2" SelectionChanged="cmbLang_SelectionChanged">
                 <ComboBoxItem>Português</ComboBoxItem><ComboBoxItem>English</ComboBoxItem>
             </ComboBox>
+            <Button Content="Sobre…" Click="btnAbout_Click" ToolTip="Versão, autor, licença e créditos"/>
         </WrapPanel>
 
         <!-- Conteúdo -->
