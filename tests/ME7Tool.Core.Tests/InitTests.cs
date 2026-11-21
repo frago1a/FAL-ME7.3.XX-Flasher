@@ -15,6 +15,7 @@ public class InitTests
             FastInitIdleMs = 0,
             FastInitResponseTimeoutMs = 50,
             FiveBaudBitMs = 1,
+            FiveBaudRetryPauseMs = 0,
         };
         return (kwp, dev);
     }
@@ -42,6 +43,43 @@ public class InitTests
         dev.RxAfterDiscard.Enqueue(new byte[] { 0x55, 0xEF, 0x8F });
         dev.EnqueueResponse(new byte[] { 0x12 }); // não é ~0x33
         Assert.Throws<Kwp2000TimeoutException>(() => kwp.Connect(KLineInit.FiveBaud));
+    }
+
+    [Fact]
+    public void SlowInit_GarbageAt10400_ConnectsAt9600()
+    {
+        var (kwp, dev) = Make(0x01);
+        dev.RxAfterDiscard.Enqueue(new byte[] { 0xF0, 0x0F, 0x3C });     // a 10400: lixo, sem 0x55
+        dev.RxAfterDiscard.Enqueue(new byte[] { 0x55, 0xEF, 0x8F });     // a 9600: sync + KB
+        dev.EnqueueResponse(new byte[] { 0xFE });                        // ~0x01
+        var log = new List<string>();
+        kwp.OnLog += log.Add;
+
+        kwp.Connect(KLineInit.FiveBaud);
+
+        Assert.Equal(9600, kwp.InitBaudRate);
+        Assert.Equal(new byte[] { 0xEF, 0x8F }, kwp.KeyBytes);
+        Assert.Contains(log, l => l.Contains("F00F3C"));                 // o lixo aparece no log
+    }
+
+    [Fact]
+    public void SlowInit_Kw1281At9600_SeenAsGarbageAt10400_IsDetectedWithoutRetry()
+    {
+        var (kwp, dev) = Make(0x01);
+        dev.RxAfterDiscard.Enqueue(new byte[] { 0xB5, 0x01, 0x0A });     // 55 01 8A a 9600 lido a 10400 (EDC15P)
+        var ex = Assert.Throws<Kwp2000Interface.Kw1281Exception>(() => kwp.Connect(KLineInit.FiveBaud));
+        Assert.Equal(9600, ex.Rate);
+        Assert.Equal(1, dev.DiscardCount);                               // não tentou outro 5 baud
+    }
+
+    [Fact]
+    public void SlowInit_Kw1281KeyBytes_SaysSo()
+    {
+        var (kwp, dev) = Make(0x01);
+        dev.RxAfterDiscard.Enqueue(new byte[] { 0x55, 0x01, 0x8A });
+        var ex = Assert.Throws<Kwp2000Interface.Kw1281Exception>(() => kwp.Connect(KLineInit.FiveBaud));
+        Assert.Contains("KW1281", ex.Message);
+        Assert.Empty(dev.WrittenFrames);                                 // não responde ~KB2
     }
 
     [Fact]

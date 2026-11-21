@@ -1,5 +1,5 @@
 # Flasher — textos fixos da janela: português<TAB>inglês
-FAL ME7.3.XX Flasher	FAL ME7.3.XX Flasher
+FAL ME7.3.xx / ME3.1 Flasher	FAL ME7.3.xx / ME3.1 Flasher
 Interface:	Interface:
 Porta:	Port:
 Atualizar portas	Refresh ports
@@ -47,8 +47,7 @@ Usar o ficheiro original	Use the original file
 Põe o original do Examiner como ficheiro a gravar (desencriptado em memória, CRC confirmado com o .Prm). Para gravar um ficheiro teu, usa o botão … do lado direito.	Sets the Examiner original as the file to write (decrypted in memory, CRC confirmed with the .Prm). To write your own file, use the … button on the right.
 Procurar por referência…	Search by reference…
 Procura um original pelo nº Bosch, software, desenho Fiat ou nome do ficheiro, sem precisar de ECU. Dá para o usar no flash ou extraí-lo desencriptado.	Searches for an original by Bosch number, software, Fiat drawing or file name, without an ECU. It can be used for flashing or extracted decrypted.
-Ativar escrita de RAM (0x3D)…	Enable RAM writing (0x3D)…
-Só ME7.3.1 (software 1037…). Encontra o byte de calibração que libera o WriteMemoryByAddress (0x3D) e grava uma cópia do ficheiro com ele a 1 (_0x3D.bin). Necessário para o logging por rotina. NÃO corrige as checksums: corrige-as no WinOLS antes de gravar.	ME7.3.1 only (1037… software). Finds the calibration byte that enables WriteMemoryByAddress (0x3D) and saves a copy of the file with it set to 1 (_0x3D.bin). Needed for routine logging. It does NOT correct the checksums: correct them in WinOLS before flashing.
 Sobre…	About…
 Versão, autor, licença e créditos	Version, author, licence and credits
 Tensão da bateria no pino 16 da ficha OBD, medida pelo interface J2534 (não pela ECU). Para programar convém ≥ 12 V, de preferência com carregador.	Battery voltage at OBD pin 16, measured by the J2534 interface (not by the ECU). For programming ≥ 12 V is advisable, ideally with a charger.
+Família da ECU. ME7.3.xx (Thesis, Stilo, Alfa 147…) ou ME3.1 (Stilo/Thesis 2.4). A ME3.1 usa outra subfunção de seed/key (0x55) e outro esquema de baud (pedido em 3 bytes); escolher aqui vai direto ao certo, sem tentativas falhadas.	ECU family. ME7.3.xx (Thesis, Stilo, Alfa 147…) or ME3.1 (Stilo/Thesis 2.4). The ME3.1 uses another seed/key sub-function (0x55) and another baud scheme (requested in 3 bytes); choosing here goes straight to the right one, with no failed attempts.

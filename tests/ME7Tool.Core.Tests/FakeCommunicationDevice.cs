@@ -30,7 +30,8 @@ public sealed class FakeCommunicationDevice : ICommunicationDevice
 
     public void Open() => IsOpen = true;
     public void Close() => IsOpen = false;
-    public void SetBaudRate(int baudRate) { }
+    public List<int> BaudRates { get; } = new();   // trocas de baud pedidas, por ordem
+    public void SetBaudRate(int baudRate) => BaudRates.Add(baudRate);
     public void SetBreak(bool enabled) => BreakLog.Add(enabled);
     public int DiscardCount { get; private set; }
 
@@ -48,7 +49,7 @@ public sealed class FakeCommunicationDevice : ICommunicationDevice
     }
 
     /// <summary>Injeta bytes no RX (lixo/resposta atrasada).</summary>
-    public void InjectRx(params byte[] bytes) { foreach (var b in bytes) _rx.Enqueue(b); }
+    public void InjectRx(params byte[] bytes) { lock (_rx) foreach (var b in bytes) _rx.Enqueue(b); }   // pode vir de outra thread
 
     public void Write(ReadOnlySpan<byte> data)
     {
@@ -72,8 +73,9 @@ public sealed class FakeCommunicationDevice : ICommunicationDevice
     public int Read(Span<byte> buffer, int timeoutMs)
     {
         int n = 0;
-        while (n < buffer.Length && _rx.Count > 0)
-            buffer[n++] = _rx.Dequeue();
+        lock (_rx)
+            while (n < buffer.Length && _rx.Count > 0)
+                buffer[n++] = _rx.Dequeue();
         return n;
     }
 

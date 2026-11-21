@@ -99,6 +99,60 @@ public class J2534KLineTests
         Assert.Equal((20, 0, 5), dev.Timing); // P1max da KwpTiming (20), não o timeout do PC
     }
 
+    /// <summary>ECU tipo ME3.1: com P1max &lt; 20 ms o interface deita fora as respostas longas (medido no carro).</summary>
+    private static void LoseLongRepliesBelowP1_20(FakeFrameDevice dev)
+    {
+        var id = new byte[] { 0x5A, 0x92 }.Concat(System.Text.Encoding.ASCII.GetBytes("0261206655 ")).ToArray();
+        dev.Ecu = req => req.Data[0] switch
+        {
+            0x1A => dev.Timing?.P1 >= 20 ? FakeFrameDevice.Frame(new byte[] { (byte)(0x80 | id.Length), 0xF1, 0x10 }.Concat(id).ToArray()) : null,
+            0x3B => dev.Timing?.P1 >= 20 ? FakeFrameDevice.Frame(0x82, 0xF1, 0x10, 0x7B, 0x98) : null,
+            0x3E => FakeFrameDevice.Frame(0x81, 0xF1, 0x10, 0x7E),
+            _ => null,
+        };
+    }
+
+    [Fact]
+    public void LostReplyOnShortP1_RaisesP1To20_AndRepeatsRead()
+    {
+        var (kwp, dev) = Make();
+        kwp.Timing.P1Max = 5;   // o perfil Download do flasher
+        kwp.Connect();
+        LoseLongRepliesBelowP1_20(dev);
+
+        var r = kwp.SendService(Kwp2000Service.ReadECUIdentification, 0x92);
+
+        Assert.Equal(new byte[] { 0x5A, 0x92 }, r.Data.Take(2).ToArray());
+        Assert.Equal(20, dev.Timing!.Value.P1);
+        kwp.SendService(Kwp2000Service.ReadECUIdentification, 0x94);   // continua a 20: já não perde
+    }
+
+    [Fact]
+    public void LostReplyOnShortP1_WriteIsNotRepeated_ButP1Raised()
+    {
+        var (kwp, dev) = Make();
+        kwp.Timing.P1Max = 5;
+        kwp.Connect();
+        LoseLongRepliesBelowP1_20(dev);
+
+        Assert.Throws<Kwp2000TimeoutException>(() => kwp.SendService(Kwp2000Service.WriteDataByLocalIdentifier, 0x98, 0x20));
+        Assert.Single(dev.Written, f => f.Length > 4 && Kwp2000Message.TryParse(f)!.Data[0] == 0x3B);   // escrita enviada uma só vez
+        Assert.Equal(20, dev.Timing!.Value.P1);
+    }
+
+    [Fact]
+    public void SilentEcu_EvenAt20_KeepsShortP1()
+    {
+        // ECU a reiniciar depois do flash: calada a 5 ms e a 20 ms → não era o P1max, fica como estava.
+        var (kwp, dev) = Make();
+        kwp.Timing.P1Max = 5;
+        kwp.Connect();
+        dev.Ecu = _ => null;
+
+        Assert.Throws<Kwp2000TimeoutException>(() => kwp.SendService(Kwp2000Service.TesterPresent));
+        Assert.Equal(5, dev.Timing!.Value.P1);
+    }
+
     [Fact]
     public void Request_IsWrittenAsOneFrame_EvenWithP4()
     {

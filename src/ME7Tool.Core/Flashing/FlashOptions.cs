@@ -128,6 +128,13 @@ public sealed class FlashOptions
     /// </summary>
     public bool ProtectBootSector { get; set; } = true;
 
+    /// <summary>
+    /// ECU da família ME3.1 (Stilo/Thesis 2.4) em vez da ME7.3.xx: usa diretamente a subfunção 0x55 do
+    /// SecurityAccess e o esquema de códigos de baud da ME3.1 (125000 pedido pelo código 6), sem as tentativas da
+    /// ME7.3.xx (0x01 / byte 0x87) que dariam NRC. Selecionável no flasher.
+    /// </summary>
+    public bool Me31 { get; set; }
+
     // --- SecurityAccess ---
     public byte SeedSubFunction { get; set; } = 0x01;
     public byte SeedParameter { get; set; } = 0x00;

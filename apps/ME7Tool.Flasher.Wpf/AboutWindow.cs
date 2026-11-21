@@ -48,8 +48,8 @@ public sealed class AboutWindow : Window
         root.Children.Add(head);
 
         root.Children.Add(Para(T(
-            "Flasher por OBD (K-line, KWP2000) para as centralinas Bosch ME7.3.1 da Fiat, Alfa Romeo e Lancia, e ME3.1 (experimental).",
-            "OBD flasher (K-line, KWP2000) for the Bosch ME7.3.1 ECUs of Fiat, Alfa Romeo and Lancia, and ME3.1 (experimental).")));
+            "Flasher por OBD (K-line, KWP2000) para as centralinas Bosch ME7.3.1 e ME3.1 da Fiat, Alfa Romeo e Lancia.",
+            "OBD flasher (K-line, KWP2000) for the Bosch ME7.3.1 and ME3.1 ECUs of Fiat, Alfa Romeo and Lancia.")));
 
         root.Children.Add(new TextBlock { Text = $"© 2026 {Author}", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 2) });
         var link = new Hyperlink(new Run(RepoUrl)) { NavigateUri = new Uri(RepoUrl), Foreground = Link };

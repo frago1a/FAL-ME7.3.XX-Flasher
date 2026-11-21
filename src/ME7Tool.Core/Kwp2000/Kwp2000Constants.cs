@@ -104,6 +104,20 @@ public readonly record struct DtcRecord(ushort Code, byte Status)
     /// <summary>Código no formato de oficina, ex.: 0x0335 → "P0335", 0x4123 → "C0123".</summary>
     public string DisplayCode => $"{"PCBU"[Code >> 14]}{Code & 0x3FFF:X4}";
 
+    /// <summary>UDS: 3.º byte do DTC (tipo de falha, ISO 15031-6/SAE J2012-DA); null em KWP2000.</summary>
+    public byte? FailureType { get; init; }
+
+    /// <summary>UDS: byte de estado original (ISO 14229, bits testFailed… warningIndicator); null em KWP2000.</summary>
+    public byte? UdsStatus { get; init; }
+
+    /// <summary>Código com o tipo de falha quando o há (UDS): "P0045-16"; senão igual a <see cref="DisplayCode"/>.</summary>
+    public string FullCode => FailureType is byte ft && ft != 0 ? $"{DisplayCode}-{ft:X2}" : DisplayCode;
+
+    /// <summary>Bytes como vieram da ECU: KWP "0x0335 / 0xE4"; UDS "0x004516 / 0x2F".</summary>
+    public string RawText => UdsStatus is byte us
+        ? $"0x{Code:X4}{FailureType ?? 0:X2} / 0x{us:X2}"
+        : $"0x{Code:X4} / 0x{Status:X2}";
+
     /// <summary>Bit 7: a luz de avaria (MIL) está acesa por causa deste DTC.</summary>
     public bool WarningLamp => (Status & 0x80) != 0;
 

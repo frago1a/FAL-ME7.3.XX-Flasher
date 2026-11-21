@@ -25,6 +25,12 @@ public sealed class KwpTiming
     /// <summary>Timeout total à espera do início da resposta.</summary>
     public int ResponseTimeoutMs { get; set; } = 1000;
 
+    /// <summary>
+    /// P2*max: espera depois de um responsePending (7F xx 78). A ECU está ocupada (ex.: a ME3.1 a gravar o tester
+    /// code na EEPROM demora ~2 s) e manda a resposta final dentro deste tempo (ISO 14230-3: 5000 ms).
+    /// </summary>
+    public int ResponsePendingTimeoutMs { get; set; } = 5000;
+
     /// <summary>Timeout entre bytes consecutivos da resposta (deteta fim de frame).</summary>
     public int InterByteTimeoutMs { get; set; } = 40;
 

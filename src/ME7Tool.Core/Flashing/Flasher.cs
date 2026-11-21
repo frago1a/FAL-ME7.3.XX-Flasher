@@ -290,6 +290,7 @@ public sealed class Flasher
         }
 
         Report(FlashPhase.Connecting, 0, 0, T("A entrar na sessão de programação (0x85)...", "Entering programming session (0x85)..."));
+        _kwp.Me31BaudScheme = _opt.Me31;   // ME3.1: esquema de baud próprio, sem tentar o byte da ME7.3.xx
         _kwp.StartDiagnosticSession(_opt.ProgrammingSession, _opt.WorkingBaud);
 
         if (_opt.NegotiateTiming)
@@ -299,7 +300,9 @@ public sealed class Flasher
         }
 
         Report(FlashPhase.Unlocking, 0, 0, "SecurityAccess (seed/key)...");
-        try { _kwp.SecurityAccessUnlock(_opt.SeedSubFunction, _opt.SeedParameter, _opt.PerEcuPoly); }
+        // ME3.1: subfunção 0x55 direta (sem a tentativa 0x01 que daria NRC 0x12); ME7.3.xx: a configurada.
+        byte seedSub = _opt.Me31 ? SecurityAccess.Me31SeedSubFunction : _opt.SeedSubFunction;
+        try { _kwp.SecurityAccessUnlock(seedSub, _opt.SeedParameter, _opt.PerEcuPoly); }
         catch (Kwp2000NegativeResponseException ex) when (ex.ResponseCode == Kwp2000ResponseCode.ConditionsNotCorrectOrRequestSequenceError)
         {
             throw new InvalidOperationException(

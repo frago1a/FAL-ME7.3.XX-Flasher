@@ -32,6 +32,13 @@ public static class SecurityAccess
     /// <summary>Fallback usado pelo firmware quando a zona por-ECU está em branco.</summary>
     public const uint FallbackPoly = 0xFABC568E;
 
+    /// <summary>
+    /// Subfunção do 0x27 da ME3.1 (Stilo/Thesis 2.4) para pedir seed: 0x55 (enviar key = 0x56). O handler
+    /// (Stilo Dump Origine, sub_31EC) só aceita a subfunção se (sub+1)>>1 == 0x2B; a key usa o mesmo poly
+    /// por-ECU (0x564A4F25) e N = 0x23, que o <see cref="ComputeFiatKey"/> já escolhe para esta subfunção.
+    /// </summary>
+    public const byte Me31SeedSubFunction = 0x55;
+
     private const uint Mask = 0xFFFFFFFF;
 
     /// <summary>Núcleo do LFSR: aplica N iterações com o polinómio dado.</summary>

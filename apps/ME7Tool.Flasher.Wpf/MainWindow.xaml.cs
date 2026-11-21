@@ -481,12 +481,6 @@ public partial class MainWindow : Window
         lstDiff.Items.Add(T($"4. 31 01 {a0} {a1} {cs >> 8:X2} {cs & 0xFF:X2}  verificação (CRC-32 {(prof.Checksum == CrcHalf.High ? ">> 16" : "& FFFF")})",
                             $"4. 31 01 {a0} {a1} {cs >> 8:X2} {cs & 0xFF:X2}  verification (CRC-32 {(prof.Checksum == CrcHalf.High ? ">> 16" : "& FFFF")})"));
         lstDiff.Items.Add(T($"ⓘ Chave: {Convert.ToHexString(key)} ({keySrc})", $"ⓘ Key: {Convert.ToHexString(key)} ({keySrc})"));
-        if (RamWriteUnlock.Find(img) is { } unlock)
-            lstDiff.Items.Add(unlock.Unlocked
-                ? T($"ⓘ 0x3D: ativo (byte 0x{unlock.Address:X6} = 01) — confirma que corrigiste as checksums no WinOLS",
-                    $"ⓘ 0x3D: enabled (byte 0x{unlock.Address:X6} = 01) — make sure you corrected the checksums in WinOLS")
-                : T($"ⓘ 0x3D: bloqueado de fábrica (byte 0x{unlock.Address:X6} = 00); para o logging por rotina: Ferramentas → Ativar escrita de RAM",
-                    $"ⓘ 0x3D: locked from factory (byte 0x{unlock.Address:X6} = 00); for routine logging: Tools → Enable RAM writing"));
         if (prof.HasBackupZone)
             lstDiff.Items.Add(T("ⓘ Zona 0x38000–0x3FFFF enviada em branco, como o Examiner (a ECU gere o backup).",
                                 "ⓘ Area 0x38000–0x3FFFF sent blank, like the Examiner (the ECU manages the backup)."));
@@ -522,8 +516,19 @@ public partial class MainWindow : Window
     private void ApplyOptions(CoreFlasher f)
     {
         f.Options.WorkingBaud = WorkingBaud();
+        f.Options.Me31 = cmbEcuType?.SelectedIndex == 1;   // ME3.1: seed 0x55 + esquema de baud próprio, sem tentativas
         f.Options.KeepEcuIdentification = chkKeepIdent.IsChecked == true;
         f.Options.DiagnoseOnHandoverFailure = false; // versão final: sem diagnóstico automático
+    }
+
+    /// <summary>
+    /// Ao escolher a família da ECU, repõe o baud recomendado: 124800 nas duas (a ECU fica a 125000 reais; na ME3.1
+    /// o Core pede-o como 125000 exato). 115200 é recusado pelas duas.
+    /// </summary>
+    private void cmbEcuType_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (cmbBaud == null) return;
+        cmbBaud.Text = "124800";
     }
 
     private void chkKeepIdent_Changed(object sender, RoutedEventArgs e)
@@ -565,10 +570,16 @@ public partial class MainWindow : Window
                 "The ECU will ERASE THE WHOLE FLASH (including the boot) and write the entire file.\n")
             : T($"A ECU vai APAGAR 0x{prof.EraseStart:X6}–0x{prof.EraseEnd:X6} (o arranque/programador fica intacto) e escrever {kb} KB.\n",
                 $"The ECU will ERASE 0x{prof.EraseStart:X6}–0x{prof.EraseEnd:X6} (boot/programmer stays intact) and write {kb} KB.\n");
-        string expWarn = prof == FiatFlashProfile.Me31
-            ? T("⚠ ME3.1 EXPERIMENTAL: o procedimento foi confirmado no firmware e é igual byte a byte ao do Examiner, mas ainda NUNCA correu numa ECU real. Faz o primeiro em bancada, com backup e BSL à mão.\n\n",
-                "⚠ ME3.1 EXPERIMENTAL: the procedure was confirmed in the firmware and is byte-identical to the Examiner's, but it has NEVER run on a real ECU yet. Do the first one on the bench, with a backup and BSL at hand.\n\n")
-            : "";
+        // O ficheiro diz a família (bloco de identificação): o seletor de ECU acompanha-o. Com a família errada a
+        // sessão falhava logo (antes de apagar) — o pedido de baud de uma é lido de outra forma pela outra.
+        int wantFamily = prof == FiatFlashProfile.Me31 ? 1 : 0;
+        if (cmbEcuType.SelectedIndex != wantFamily)
+        {
+            cmbEcuType.SelectedIndex = wantFamily;
+            Log(T($"ECU ajustada para {(wantFamily == 1 ? "ME3.1" : "ME7.3.xx")}, de acordo com o ficheiro.",
+                  $"ECU set to {(wantFamily == 1 ? "ME3.1" : "ME7.3.xx")} to match the file."));
+        }
+        const string expWarn = "";
         double? vbat = null;
         if (_device is IBatteryMonitor)
             vbat = await Task.Run(() => { lock (_ioLock) return ReadBattery(); });
@@ -599,70 +610,17 @@ public partial class MainWindow : Window
         ApplyOptions(flasher);
         bool done = await RunBusy("Flash", () => flasher.ProgramFiatFull(img, key, date, tester, profile: prof));
         if (done)
+        {
+            // A ECU vai reiniciar com o software novo (power cycle): sem keep-alive nem ligação a fingir que está viva.
+            StopKeepAlive();
+            Disconnect();
+            Log(T("Desligado depois do flash: religa a ignição e liga de novo para ler a ECU.",
+                  "Disconnected after the flash: cycle the ignition and connect again to read the ECU."));
+        }
+        if (done)
             MessageBox.Show(T("Flash concluído e checksum confirmada.\nDesliga e volta a ligar a ignição para a ECU arrancar o software novo.",
                               "Flash complete and checksum confirmed.\nTurn the ignition off and on again so the ECU starts the new software."),
                 "OK", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    /// <summary>
-    /// Ferramentas → ativar o 0x3D: grava uma cópia ME7.3.1 com o byte de desbloqueio a 1 (não precisa de ECU).
-    /// As checksums da Bosch ficam por corrigir — tem de ser no WinOLS antes de gravar.
-    /// </summary>
-    private void btnUnlock3D_Click(object sender, RoutedEventArgs e)
-    {
-        var open = new OpenFileDialog
-        {
-            Title = T("Ficheiro ME7.3.1 (512 KB, desencriptado ou original do Examiner)", "ME7.3.1 file (512 KB, decrypted or Examiner original)"),
-            Filter = T("Binário ECU (*.bin;*.ori)|*.bin;*.ori|Todos|*.*", "ECU binary (*.bin;*.ori)|*.bin;*.ori|All|*.*"),
-            FileName = File.Exists(txtNew.Text) ? Path.GetFileName(txtNew.Text) : "",
-            InitialDirectory = File.Exists(txtNew.Text) ? Path.GetDirectoryName(txtNew.Text) : "",
-        };
-        if (open.ShowDialog() != true) return;
-        try
-        {
-            // original do Examiner (cifrado, com .Prm) ou ficheiro já desencriptado
-            byte[] img = ExaminerLibrary.OpenImage(open.FileName, out _) is { } orig ? orig.Image : File.ReadAllBytes(open.FileName);
-            var info = RamWriteUnlock.Find(img);
-            if (info == null)
-            {
-                MessageBox.Show(this,
-                    T("Este ficheiro não tem a porta do 0x3D que o flasher sabe ativar.\n\nSó existe nos softwares ME7.3.1 1037… (Thesis, Stilo, …). Os 1277… antigos (ex.: Alfa 147) e a ME3.1 não a têm.",
-                      "This file does not have the 0x3D gate the flasher can enable.\n\nIt only exists in ME7.3.1 1037… software (Thesis, Stilo, …). The older 1277… ones (e.g. Alfa 147) and the ME3.1 do not have it."),
-                    "0x3D", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            if (info.Unlocked)
-            {
-                MessageBox.Show(this, T($"O 0x3D já está desbloqueado neste ficheiro (byte 0x{info.Address:X6} = 01). Nada a fazer.",
-                                        $"0x3D is already enabled in this file (byte 0x{info.Address:X6} = 01). Nothing to do."),
-                    "0x3D", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var patched = RamWriteUnlock.Apply(img, out _);
-            var save = new SaveFileDialog
-            {
-                Title = T("Guardar o ficheiro com o 0x3D ativo", "Save the file with 0x3D enabled"),
-                Filter = T("Binário ECU (*.bin)|*.bin", "ECU binary (*.bin)|*.bin"),
-                InitialDirectory = Path.GetDirectoryName(open.FileName),
-                FileName = Path.GetFileNameWithoutExtension(open.FileName) + "_0x3D.bin",
-            };
-            if (save.ShowDialog() != true) return;
-            File.WriteAllBytes(save.FileName, patched);
-            Log(T($"0x3D: byte 0x{info.Address:X6} (ficheiro 0x{info.FileOffset:X5}) 00 → 01 → {save.FileName}. Checksums POR CORRIGIR.",
-                  $"0x3D: byte 0x{info.Address:X6} (file 0x{info.FileOffset:X5}) 00 → 01 → {save.FileName}. Checksums NOT corrected."));
-            MessageBox.Show(this,
-                T($"Gravado: {save.FileName}\nByte 0x{info.Address:X6} (offset 0x{info.FileOffset:X5} no ficheiro): 00 → 01.\n\n" +
-                  "⚠ CORRIGE AS CHECKSUMS NO WINOLS ANTES DE GRAVAR NA ECU.\n" +
-                  "O byte fica na calibração, coberta pelas checksums da Bosch, e o flasher não as corrige. " +
-                  "Sem a correção, a ECU deteta a calibração alterada (avaria / pode não arrancar).",
-                  $"Saved: {save.FileName}\nByte 0x{info.Address:X6} (file offset 0x{info.FileOffset:X5}): 00 → 01.\n\n" +
-                  "⚠ CORRECT THE CHECKSUMS IN WINOLS BEFORE FLASHING THE ECU.\n" +
-                  "The byte is in the calibration, covered by the Bosch checksums, and the flasher does not correct them. " +
-                  "Without the correction the ECU detects the changed calibration (fault / may not start)."),
-                T("0x3D ativado — corrigir checksums", "0x3D enabled — correct checksums"), MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        catch (Exception ex) { Log(T($"ERRO 0x3D: {ex.Message}", $"ERROR 0x3D: {ex.Message}")); }
     }
 
     /// <summary>Desencripta um .BIN do Examiner e grava _dec.bin ao lado (não precisa de ECU).</summary>

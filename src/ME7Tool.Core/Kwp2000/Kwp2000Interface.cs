@@ -71,7 +71,7 @@ public sealed class Kwp2000Interface : ILogChannel
     public void Connect(KLineInit init = KLineInit.FastInit)
     {
         try { ConnectOnce(init); }
-        catch (Kwp2000Exception) when (RetryAfterP3Max)
+        catch (Kwp2000Exception ex) when (RetryAfterP3Max && ex is not Kw1281Exception)
         {
             // A ECU pode estar ainda na sessão anterior, ao baud de trabalho (ligação que não terminou, ou uma ECU que
             // recusa o StopCommunication): ignora o fast-init até o P3max expirar. Espera o que falta e tenta outra vez.
@@ -113,6 +113,7 @@ public sealed class Kwp2000Interface : ILogChannel
             foreach (var target in targets)
             {
                 try { FiveBaudInit(target); return; }
+                catch (Kw1281Exception) { throw; } // a ECU existe mas fala outro protocolo: dizê-lo, sem mais tentativas
                 catch (Kwp2000Exception ex) { LogMsg(T($"0x{target:X2} sem resposta ao 5 baud: {ex.Message}", $"0x{target:X2} no answer at 5 baud: {ex.Message}")); }
             }
             throw new Kwp2000TimeoutException(T($"Sem resposta ao slow init (5 baud) em {list}.", $"No answer to slow init (5 baud) on {list}."));
@@ -126,12 +127,21 @@ public sealed class Kwp2000Interface : ILogChannel
                 try
                 {
                     LogMsg($"Fast-init → 0x{target:X2}" + (attempt > 1 ? T($" (tentativa {attempt})…", $" (attempt {attempt})…") : "…"));
-                    FastInitPulse();
+                    var pulse = FastInitPulse();
                     _device.DiscardBuffers(); // limpa o ruído da transição do wake
                     _rxCount = 0; _rxPos = 0;
                     var req = new Kwp2000Message(InitAddressMode(target), target, TesterAddress,
                         (byte)Kwp2000Service.StartCommunication);
-                    var resp = SendRequest(req, FastInitResponseTimeoutMs);
+                    Kwp2000Message resp;
+                    try { resp = SendRequest(req, FastInitResponseTimeoutMs); }
+                    catch (Kwp2000Exception)
+                    {
+                        // Tempos reais do pulso (incluem a demora das chamadas ao cabo): para comparar a 1.ª tentativa,
+                        // que falha logo após abrir o cabo, com a 2.ª, que liga. Norma: baixo 25 ± 1 ms, total 50 ± 1 ms.
+                        LogMsg(T($"Pulso medido: baixo {pulse.LowMs:0.0} ms · alto {pulse.HighMs:0.0} ms (chamadas ao cabo: break on {pulse.BreakOnCallMs:0.0} ms, break off {pulse.BreakOffCallMs:0.0} ms).",
+                                 $"Measured pulse: low {pulse.LowMs:0.0} ms · high {pulse.HighMs:0.0} ms (cable calls: break on {pulse.BreakOnCallMs:0.0} ms, break off {pulse.BreakOffCallMs:0.0} ms)."));
+                        throw;
+                    }
                     LogMsg(T($"Resposta de 0x{resp.Source:X2}: {Convert.ToHexString(resp.Encode())}", $"Response from 0x{resp.Source:X2}: {Convert.ToHexString(resp.Encode())}"));
                     if (resp.Data.Length >= 3 && resp.Data[0] == 0xC1)
                     {
@@ -162,7 +172,7 @@ public sealed class Kwp2000Interface : ILogChannel
     {
         // P1max: o interface espera este tempo de linha calada depois de cada resposta antes de deixar sair o
         // pedido seguinte (visto no Scanmatik 2: 40 ms → ~17 Hz). É o campo P1max da UI, não o timeout do PC.
-        dev.SetTiming(Math.Max(1, Timing.P1Max), EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
+        dev.SetTiming(FrameP1, EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
         string how = init == KLineInit.FiveBaud ? T("slow init (5 baud)", "slow init (5 baud)") : "fast-init";
         LogMsg(T($"J2534 ({dev.Name}): {how} a {InitBaudRate} baud, a tentar {list}.", $"J2534 ({dev.Name}): {how} at {InitBaudRate} baud, trying {list}."));
         foreach (var target in targets)
@@ -218,7 +228,7 @@ public sealed class Kwp2000Interface : ILogChannel
         Timing.P2Min = t.P2Min; Timing.P2Max = t.P2Max;
         Timing.P3Min = t.P3Min; Timing.P3Max = t.P3Max;
         Timing.P4Min = t.P4Min;
-        _frameDevice?.SetTiming(Math.Max(1, Timing.P1Max), EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
+        _frameDevice?.SetTiming(FrameP1, EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
         LogMsg($"Timings: P1max {Timing.P1Max} · P2 {Timing.P2Min}-{Timing.P2Max} · P3 {Timing.P3Min}-{Timing.P3Max} · P4min {Timing.P4Min} ms.");
     }
 
@@ -231,7 +241,9 @@ public sealed class Kwp2000Interface : ILogChannel
 
     /// <summary>
     /// Tentativas de fast-init por endereço. A 1.ª tentativa logo após abrir o cabo FTDI falha de forma
-    /// consistente (visto na Thesis: o logger só ligava à 2.ª tentativa); 2 cobre isso.
+    /// consistente (Thesis, EDC16C8, EDC16C39: só o eco) e a 2.ª liga; 2 cobre isso. Não é o pulso: medido no
+    /// carro, 25,5 ms baixo / 25,1 ms alto, chamadas ao cabo 0,5 / 0,1 ms — e 1 s de repouso extra antes também
+    /// não ajudou. Provavelmente a ECU ignora o 1.º wake-up depois de estar parada.
     /// </summary>
     public int FastInitAttemptsPerTarget { get; set; } = 2;
 
@@ -243,13 +255,35 @@ public sealed class Kwp2000Interface : ILogChannel
     /// <summary>Duração de cada bit no slow init (200 ms = 5 baud). Ajustável só para testes.</summary>
     public double FiveBaudBitMs { get; set; } = 200;
 
-    /// <summary>Pulso de fast-init (ISO 14230): idle alto ≥ W5, 25 ms baixo, 25 ms alto. Busy-wait preciso.</summary>
-    private void FastInitPulse()
+    /// <summary>Tempos reais de um pulso de fast-init (Stopwatch), para o log quando a ECU não responde.</summary>
+    private readonly record struct PulseTiming(double LowMs, double HighMs, double BreakOnCallMs, double BreakOffCallMs);
+
+    /// <summary>
+    /// Pulso de fast-init (ISO 14230): idle alto ≥ W5, 25 ms baixo, 25 ms alto. Busy-wait preciso a contar do fim
+    /// de cada chamada ao cabo (como sempre funcionou na 2.ª tentativa); mede também quanto demorou cada chamada.
+    /// </summary>
+    private PulseTiming FastInitPulse()
     {
         _device.SetBreak(false);
         IdleWait(FastInitIdleMs);
-        _device.SetBreak(true); BusyWaitMs(25);    // TiniL (baixo)
-        _device.SetBreak(false); BusyWaitMs(25);   // alto antes do StartCommunication
+        long t0 = Stopwatch.GetTimestamp();
+        _device.SetBreak(true);                                    // TiniL (baixo)
+        long c0 = Stopwatch.GetTimestamp();
+        WaitUntilTicks(c0, 25);
+        long t1 = Stopwatch.GetTimestamp();
+        _device.SetBreak(false);                                   // alto antes do StartCommunication
+        long c1 = Stopwatch.GetTimestamp();
+        WaitUntilTicks(c1, 25);
+        long t2 = Stopwatch.GetTimestamp();
+        double f = 1000.0 / Stopwatch.Frequency;
+        return new PulseTiming((t1 - t0) * f, (t2 - t1) * f, (c0 - t0) * f, (c1 - t1) * f);
+    }
+
+    /// <summary>Busy-wait até <paramref name="ms"/> depois de <paramref name="startTicks"/> (não acumula a demora da chamada).</summary>
+    private static void WaitUntilTicks(long startTicks, double ms)
+    {
+        long end = startTicks + (long)(Stopwatch.Frequency * ms / 1000.0);
+        while (Stopwatch.GetTimestamp() < end) { }
     }
 
     /// <summary>
@@ -259,7 +293,47 @@ public sealed class Kwp2000Interface : ILogChannel
     /// </summary>
     private void FiveBaudInit(byte address)
     {
-        LogMsg(T($"5 baud → endereço 0x{address:X2}…", $"5 baud → address 0x{address:X2}…"));
+        // Algumas ECUs (ex.: VAG antigas) respondem a 9600 e não a 10400: um 0x55 a 9600 lido a 10400 sai lixo.
+        // Tenta cada baud de FiveBaudRates; o que falhou fica no log com os bytes que chegaram.
+        var rates = FiveBaudRates is { Length: > 0 } ? FiveBaudRates : new[] { InitBaudRate };
+        Kwp2000Exception? last = null;
+        foreach (int rate in rates)
+        {
+            try { FiveBaudInitAt(address, rate); return; }
+            catch (Kw1281Exception) { throw; } // a ECU respondeu: não vale a pena outro baud
+            catch (Kwp2000Exception ex)
+            {
+                last = ex;
+                if (rates.Length > 1) LogMsg(T($"5 baud a {rate}: {ex.Message}", $"5 baud at {rate}: {ex.Message}"));
+                // A ECU respondeu (a outro baud) e ficou à espera do ~KB2: dá-lhe tempo para desistir antes de
+                // outro endereço a 5 baud — na EDC15P, 0,3 s não chegava e a tentativa seguinte ficava calada.
+                if (_fiveBaudGotBytes) Thread.Sleep(FiveBaudRetryPauseMs);
+            }
+        }
+        throw last!;
+    }
+
+    /// <summary>Bauds a ouvir depois do endereço a 5 baud, por ordem. 10400 (KWP2000) e 9600 (algumas VAG antigas).</summary>
+    public int[] FiveBaudRates { get; set; } = { 10400, 9600 };
+
+    /// <summary>Pausa antes de outro endereço a 5 baud quando a ECU respondeu a outro baud (ficou à espera do ~KB2).</summary>
+    public int FiveBaudRetryPauseMs { get; set; } = 3000;
+
+    /// <summary>A última tentativa a 5 baud recebeu bytes (mesmo sem 0x55).</summary>
+    private bool _fiveBaudGotBytes;
+
+    /// <summary>A ECU respondeu ao 5 baud com key bytes de KW1281 (protocolo antigo da VAG), que este código não fala.</summary>
+    public sealed class Kw1281Exception(string message, int rate, byte address) : Kwp2000Exception(message)
+    {
+        /// <summary>Baud a que a ECU respondeu (para ligar logo em KW1281).</summary>
+        public int Rate => rate;
+        public byte Address => address;
+    }
+
+    private void FiveBaudInitAt(byte address, int rate)
+    {
+        _fiveBaudGotBytes = false;
+        LogMsg(T($"5 baud → endereço 0x{address:X2} (resposta a {rate} baud)…", $"5 baud → address 0x{address:X2} (answer at {rate} baud)…"));
         _device.SetBreak(false);
         IdleWait(FastInitIdleMs);
 
@@ -279,23 +353,46 @@ public sealed class Kwp2000Interface : ILogChannel
         }
 
         // Durante o stop bit: limpar o lixo do eco do bit-banging e esperar o 0x55.
-        _device.SetBaudRate(InitBaudRate);
+        _device.SetBaudRate(rate);
         _device.DiscardBuffers();
         _rxCount = 0; _rxPos = 0;
 
         var one = new byte[1];
+        var junk = new List<byte>();                 // o que chegou antes do 0x55 (para o log)
         long deadline = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * (FiveBaudBitMs + 400) / 1000);
         while (true)
         {
             if (Stopwatch.GetTimestamp() > deadline)
-                throw new Kwp2000TimeoutException(T("sem byte de sincronismo 0x55.", "no 0x55 sync byte."));
+            {
+                _fiveBaudGotBytes = junk.Count > 0;
+                // "x5 01 0A" a 10400 = "55 01 8A" de uma ECU KW1281 a 9600 (visto na EDC15P: B5 01 0A, A5 01 0A):
+                // o 0x55 sai torto, mas KB1 = 01 e KB2 = 0A/8A passam inteiros. Não se gasta outra tentativa.
+                if (rate != 9600 && junk.Count >= 3 && (junk[^3] & 0x0F) == 0x05 && junk[^2] == 0x01 && (junk[^1] & 0x7F) == 0x0A)
+                    throw new Kw1281Exception(T(
+                        $"a {rate} baud chegou {Convert.ToHexString(junk.ToArray())} = 55 01 8A de uma ECU a 9600 → KW1281 (protocolo antigo da VAG, o do VCDS), não KWP2000.",
+                        $"at {rate} baud {Convert.ToHexString(junk.ToArray())} arrived = 55 01 8A from an ECU at 9600 → KW1281 (old VAG protocol, the one VCDS uses), not KWP2000."), 9600, address);
+                string got = junk.Count == 0
+                    ? T("não chegou nenhum byte", "no byte arrived")
+                    : T($"chegaram {junk.Count} byte(s) sem 0x55: {Convert.ToHexString(junk.Take(16).ToArray())}{(junk.Count > 16 ? "…" : "")} (baud errado?)",
+                        $"{junk.Count} byte(s) arrived without 0x55: {Convert.ToHexString(junk.Take(16).ToArray())}{(junk.Count > 16 ? "…" : "")} (wrong baud?)");
+                throw new Kwp2000TimeoutException(T($"sem byte de sincronismo 0x55 — {got}.", $"no 0x55 sync byte — {got}."));
+            }
             try { ReadInto(one, 50); } catch (Kwp2000TimeoutException) { continue; }
-            if (one[0] == 0x55) break;               // ignora lixo antes do sync
+            if (one[0] == 0x55) break;
+            junk.Add(one[0]);                        // ignora lixo antes do sync, mas guarda-o
         }
+        if (junk.Count > 0) LogMsg(T($"Antes do 0x55 chegou: {Convert.ToHexString(junk.ToArray())}.", $"Before 0x55 arrived: {Convert.ToHexString(junk.ToArray())}."));
 
         var kb = new byte[2];
         ReadInto(kb, 100);
-        LogMsg($"Sync 0x55 · key bytes {kb[0]:X2} {kb[1]:X2}.");
+        LogMsg($"Sync 0x55 a {rate} baud · key bytes {kb[0]:X2} {kb[1]:X2}.");
+
+        // KW1281 (VAG antigo): KB1 = 0x01, KB2 = 0x8A (o 0x80 do KB2 é a paridade). Depois do ~KB2 a ECU manda
+        // blocos de identificação, não o ~endereço do KWP2000 — este código não fala esse protocolo.
+        if ((kb[0] & 0x7F) == 0x01 && (kb[1] & 0x7F) == 0x0A)
+            throw new Kw1281Exception(T(
+                $"a ECU respondeu a {rate} baud com key bytes {kb[0]:X2} {kb[1]:X2} = KW1281 (protocolo antigo da VAG, o do VCDS), não KWP2000.",
+                $"the ECU answered at {rate} baud with key bytes {kb[0]:X2} {kb[1]:X2} = KW1281 (old VAG protocol, the one VCDS uses), not KWP2000."), rate, address);
 
         BusyWaitMs(30);                              // W4 (25–50 ms)
         byte inv = (byte)~kb[1];
@@ -306,6 +403,11 @@ public sealed class Kwp2000Interface : ILogChannel
         if (one[0] != (byte)~address)
             throw new Kwp2000Exception(T($"ECU respondeu 0x{one[0]:X2} em vez de ~endereço 0x{(byte)~address:X2}.", $"ECU answered 0x{one[0]:X2} instead of ~address 0x{(byte)~address:X2}."));
 
+        if (rate != InitBaudRate)
+        {
+            LogMsg(T($"A ECU respondeu a {rate} baud (não {InitBaudRate}): passo a usar {rate}.", $"The ECU answered at {rate} baud (not {InitBaudRate}): using {rate} from now on."));
+            InitBaudRate = rate;
+        }
         KeyBytes = kb;
         EcuAddress = address;
         _lastResponseEndTicks = 0;
@@ -354,6 +456,113 @@ public sealed class Kwp2000Interface : ILogChannel
         finally { OnLog = log; }
     }
 
+    /// <summary>Resultado de cada código na última <see cref="ReadIdentification"/> ("92:ok/40ms", "90:NRC12/30ms", "93:—800ms" = calada).</summary>
+    public IReadOnlyList<string> LastIdentificationTrace { get; private set; } = Array.Empty<string>();
+
+    /// <summary>Códigos do ReadEcuIdentification (0x1A) pedidos ao ligar, com o nome (ISO 14230-3).</summary>
+    public static IReadOnlyList<(byte Id, string Pt, string En)> IdentificationIds { get; } = new (byte, string, string)[]
+    {
+        (0x90, "VIN", "VIN"),
+        (0x91, "Nº de peça do fabricante (hardware)", "Vehicle manufacturer hardware number"),
+        (0x87, "Nº de peça de substituição", "Spare part number"),
+        (0x88, "Nº de software do fabricante", "Vehicle manufacturer software number"),
+        (0x89, "Versão de software do fabricante", "Vehicle manufacturer software version"),
+        (0x92, "Nº de hardware do fornecedor (ex.: Bosch 0281…)", "System supplier hardware number (e.g. Bosch 0281…)"),
+        (0x93, "Versão de hardware do fornecedor", "System supplier hardware version"),
+        (0x94, "Nº de software do fornecedor (ex.: 1037…)", "System supplier software number (e.g. 1037…)"),
+        (0x95, "Versão de software do fornecedor", "System supplier software version"),
+        (0x97, "Sistema / motor", "System name / engine type"),
+        (0x8A, "Fornecedor", "System supplier"),
+        (0x8C, "Nº de série da ECU", "ECU serial number"),
+        (0x8B, "Data de fabrico", "Manufacturing date"),
+        (0x99, "Data de programação", "Programming date"),
+        (0x98, "Código da oficina / tester", "Repair shop / tester code"),
+        (0x96, "Homologação", "Type approval number"),
+        // registos completos: a EDC16C8 só dá o nº de hardware Bosch dentro do 83
+        (0x83, "Registo de identificação (83)", "Identification record (83)"),
+        (0x80, "Registo de identificação (80)", "Identification record (80)"),
+    };
+
+    /// <summary>
+    /// Lê a identificação da ECU (0x1A) para os códigos de <see cref="IdentificationIds"/>. Devolve só os que
+    /// respondem (texto se for legível, senão hex). Não lança: os que a ECU recusa ou ignora ficam de fora.
+    /// </summary>
+    public List<(byte Id, string Name, string Value)> ReadIdentification(int timeoutMs = 400)
+    {
+        var found = new List<(byte, string, string)>();
+        // P3min normal (ISO/Fiat 07223: 55 ms) durante a leitura: é feita na sessão normal, antes de negociar os
+        // timings rápidos. Com P3min 0 a EDC16C8 respondia ao 1.º pedido, calava-se e depois dava BusyRepeatRequest
+        // (0x21) à sessão 0x86. O P4 (entre bytes do tester) fica como está.
+        int p3 = Timing.P3Min;
+        bool enforce = EnforceP3Min;
+        Timing.P3Min = Math.Max(p3, KwpTiming.Normal().P3Min);
+        EnforceP3Min = true;
+        _frameDevice?.SetTiming(FrameP1, Timing.P3Min, Timing.P4Min);
+        try
+        {
+            int silent = 0;
+            var trace = new List<string>();
+            LastIdentificationTrace = trace;
+            // A EDC16C8 responde 7F 1A 21 ("ocupada") a alguns códigos e só dá a resposta verdadeira quando recebe o
+            // pedido seguinte: depois de um 0x21 repete-se o mesmo pedido (ISO 14230-3). Cada resposta positiva conta
+            // pelo código que traz (5A <código>), não pelo pedido em que chegou.
+            var values = new Dictionary<byte, string>();
+            void Take(byte[]? resp)
+            {
+                if (resp is { Length: >= 3 } && resp[0] == 0x5A && !values.ContainsKey(resp[1]))
+                {
+                    string v = FormatIdentification(resp.AsSpan(2));
+                    if (v.Length > 0) values[resp[1]] = v;
+                }
+            }
+            foreach (var (id, _, _) in IdentificationIds)
+            {
+                long t0 = Stopwatch.GetTimestamp();
+                string what = "";
+                byte[]? r = null;
+                for (int attempt = 0; attempt < 4; attempt++)
+                {
+                    r = TryRaw(new byte[] { (byte)Kwp2000Service.ReadECUIdentification, id }, timeoutMs);
+                    Take(r);
+                    bool busy = r is { Length: >= 3 } && r[0] == 0x7F && r[2] == (byte)Kwp2000ResponseCode.BusyRepeatRequest;
+                    what += (what.Length > 0 ? "→" : "") + (r == null ? "—" : r.Length >= 3 && r[0] == 0x7F ? $"NRC{r[2]:X2}" : r.Length >= 2 && r[1] != id ? $"ok({r[1]:X2})" : "ok");
+                    if (!busy || values.ContainsKey(id)) break;
+                }
+                long ms = (Stopwatch.GetTimestamp() - t0) * 1000 / Stopwatch.Frequency;
+                trace.Add($"{id:X2}:{what}/{ms}ms");
+                if (r == null) { if (++silent >= 4) break; continue; } // ECU calada: não gastar mais tempo
+                silent = 0;
+            }
+            foreach (var (id, pt, en) in IdentificationIds)
+                if (values.TryGetValue(id, out var v)) found.Add((id, T(pt, en), v));
+        }
+        finally
+        {
+            BusyWaitMs(Timing.P3Min); // o pedido seguinte (sessão) também respeita o P3min da sessão normal
+            Timing.P3Min = p3; EnforceP3Min = enforce;
+            _frameDevice?.SetTiming(FrameP1, EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// Texto se pelo menos 3/4 for ASCII imprimível (os outros bytes viram espaços — ex.: registo 83 da EDC16C8, texto
+    /// com alguns bytes binários pelo meio); senão hex. Espaços repetidos e os das pontas são cortados.
+    /// </summary>
+    public static string FormatIdentification(ReadOnlySpan<byte> data)
+    {
+        int printable = 0, n = 0;
+        foreach (byte b in data) { if (b is 0x00 or 0xFF) continue; n++; if (b >= 0x20 && b < 0x7F) printable++; }
+        if (n == 0) return "";
+        if (printable * 4 >= n * 3)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (byte b in data) sb.Append(b >= 0x20 && b < 0x7F ? (char)b : ' ');
+            return System.Text.RegularExpressions.Regex.Replace(sb.ToString(), " {2,}", " ").Trim();
+        }
+        return Convert.ToHexString(data.ToArray());
+    }
+
     /// <summary>Envia um serviço com parâmetros; devolve a resposta positiva (lança em negativa).</summary>
     public Kwp2000Message SendService(Kwp2000Service service, params byte[] parameters)
         => SendServiceWithTimeout(null, service, parameters);
@@ -392,6 +601,8 @@ public sealed class Kwp2000Interface : ILogChannel
     private long _traceT1;
     private byte[] _traceTx = Array.Empty<byte>();
     private byte[]? _traceRx;
+    private readonly byte[] _traceRxRaw = new byte[256];   // bytes crus recebidos no pedido (eco + resposta), p/ diagnóstico de timeout
+    private int _traceRxRawN;
 
     private string FormatTrace()
     {
@@ -403,6 +614,8 @@ public sealed class Kwp2000Interface : ILogChannel
         if (_traceRx != null)
             sb.Append("| ").Append(Convert.ToHexString(_traceRx.AsSpan(0, Math.Min(_traceRx.Length, 16))))
               .Append(_traceRx.Length > 16 ? $"…({_traceRx.Length})" : "");
+        else if (_traceRxRawN > 0)   // sem frame montado (ex.: timeout): mostra os bytes crus recebidos
+            sb.Append("| cru ").Append(Convert.ToHexString(_traceRxRaw.AsSpan(0, _traceRxRawN)));
         return sb.ToString();
     }
 
@@ -426,10 +639,67 @@ public sealed class Kwp2000Interface : ILogChannel
     private long _lastResponseEndTicks;
 
     /// <summary>
+    /// Num interface J2534, subir o P1max para <see cref="FrameP1Fallback"/> quando um pedido fica sem nenhum byte de
+    /// resposta (o interface descartou-a: a ECU deixou mais do que P1max entre bytes). Por omissão true.
+    /// </summary>
+    public bool AdaptiveFrameP1 { get; set; } = true;
+
+    /// <summary>P1max (ms) a usar no interface depois de detetar respostas perdidas. A ME3.1 precisa de ~20 ms.</summary>
+    public int FrameP1Fallback { get; set; } = 20;
+
+    /// <summary>Piso do P1max nesta ligação (0 = nenhum); sobe para FrameP1Fallback ao detetar respostas perdidas.</summary>
+    private int _frameP1Floor;
+
+    /// <summary>P1max efetivo para o interface J2534: o da KwpTiming, nunca abaixo do piso desta ligação.</summary>
+    private int FrameP1 => Math.Max(Math.Max(1, Timing.P1Max), _frameP1Floor);
+
+    /// <summary>Serviços de leitura que se podem repetir sem efeitos (identificação, leituras, TesterPresent, pedido de seed).</summary>
+    private static bool IsSafeToRepeat(Kwp2000Message request) => request.Data.Length > 0 && request.Data[0] switch
+    {
+        0x1A or 0x21 or 0x22 or 0x23 or 0x3E or 0x17 or 0x18 => true,
+        0x27 => request.Data.Length > 1 && (request.Data[1] & 1) == 1,   // pedir seed (subfunção ímpar)
+        _ => false,
+    };
+
+    /// <summary>
     /// Envia um pedido e devolve a resposta. Trata eco e responsePending (0x78).
     /// Lança <see cref="Kwp2000NegativeResponseException"/> em resposta negativa (exceto 0x78).
+    /// Num J2534, se a resposta se perder por inteiro com P1max curto, sobe o P1max (ver AdaptiveFrameP1) e, se o
+    /// pedido for só de leitura, repete-o — a ME3.1 deixa &gt; 5 ms entre bytes nas respostas longas (medido no carro:
+    /// 1A 92 sem resposta a 5 ms, OK a 20 ms) e o Scanmatik deitava a resposta fora.
     /// </summary>
     public Kwp2000Message SendRequest(Kwp2000Message request, int? responseTimeoutMs = null)
+    {
+        try { return SendRequestCore(request, responseTimeoutMs); }
+        catch (Kwp2000TimeoutException) when (AdaptiveFrameP1 && _frameDevice != null && FrameP1 < FrameP1Fallback && _traceRxRawN == 0)
+        {
+            int prevFloor = _frameP1Floor;
+            _frameP1Floor = FrameP1Fallback;
+            _frameDevice.SetTiming(FrameP1, EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
+            if (!IsSafeToRepeat(request))
+            {
+                LogMsg(T($"Sem resposta com P1max curto: P1max passa a {FrameP1} ms nesta ligação, por precaução.",
+                         $"No reply with a short P1max: P1max set to {FrameP1} ms for this connection, as a precaution."));
+                throw;
+            }
+            try
+            {
+                var r = SendRequestCore(request, responseTimeoutMs);
+                LogMsg(T($"O interface perdeu a resposta (P1max curto para esta ECU): P1max passa a {FrameP1} ms nesta ligação.",
+                         $"The interface lost the reply (P1max too short for this ECU): P1max set to {FrameP1} ms for this connection."));
+                return r;
+            }
+            catch (Kwp2000TimeoutException)
+            {
+                // também calada com P1max folgado: não era o P1max (ex.: ECU a reiniciar depois do flash) — repõe
+                _frameP1Floor = prevFloor;
+                _frameDevice.SetTiming(FrameP1, EnforceP3Min ? Timing.P3Min : 0, Timing.P4Min);
+                throw;
+            }
+        }
+    }
+
+    private Kwp2000Message SendRequestCore(Kwp2000Message request, int? responseTimeoutMs)
     {
         byte[] frame = request.Encode();
         if (PurgeBeforeEachRequest) { _device.DiscardBuffers(); _rxCount = 0; _rxPos = 0; }
@@ -446,7 +716,7 @@ public sealed class Kwp2000Interface : ILogChannel
             long t0 = Stopwatch.GetTimestamp();
             WriteWithInterByte(frame);
             long t1 = Stopwatch.GetTimestamp();
-            _traceN = 0; _traceT1 = t1; _traceTx = frame; _traceRx = null;
+            _traceN = 0; _traceT1 = t1; _traceTx = frame; _traceRx = null; _traceRxRawN = 0;
 
             if (ExpectEcho)
                 ReadExact(frame.Length, Timing.ResponseTimeoutMs); // descarta eco
@@ -460,7 +730,9 @@ public sealed class Kwp2000Interface : ILogChannel
                 if (resp.IsNegativeResponse &&
                     resp.NegativeResponseCode == Kwp2000ResponseCode.ResponsePending)
                 {
-                    // ECU pediu para esperar: resetar o relógio e voltar a ler.
+                    // ECU pediu para esperar: voltar a ler, agora com P2* (a resposta final pode levar segundos,
+                    // ex.: a ME3.1 a gravar o tester code na EEPROM respondeu 7B 98 ~2 s depois do 78).
+                    timeout = Math.Max(timeout, Timing.ResponsePendingTimeoutMs);
                     continue;
                 }
                 LastEcuActivity = t3;
@@ -608,6 +880,12 @@ public sealed class Kwp2000Interface : ILogChannel
             {
                 int n = Math.Min(_rxCount, dest.Length - got);
                 _rxBuf.AsSpan(_rxPos, n).CopyTo(dest[got..]);
+                if (_traceRxRawN < _traceRxRaw.Length)   // guarda os bytes crus p/ o trace (diagnóstico)
+                {
+                    int m = Math.Min(n, _traceRxRaw.Length - _traceRxRawN);
+                    _rxBuf.AsSpan(_rxPos, m).CopyTo(_traceRxRaw.AsSpan(_traceRxRawN));
+                    _traceRxRawN += m;
+                }
                 _rxPos += n; _rxCount -= n; got += n;
                 if (_rxCount == 0) _rxPos = 0;
             }
@@ -656,6 +934,14 @@ public sealed class Kwp2000Interface : ILogChannel
             }
         }
 
+        // ME3.1 (selecionada): vai direto ao esquema de códigos de baud, sem tentar o byte standard (que daria NRC).
+        if (wantBaud && Me31BaudScheme)
+        {
+            if (TryMe31FastBaud(session, Me31BaudParams(workingBaud), workingBaud)) return;
+            LogMsg(T($"Esquema ME3.1 não aceite; continua a {InitBaudRate}.", $"ME3.1 scheme not accepted; staying at {InitBaudRate}."));
+            wantBaud = false;
+        }
+
         if (wantBaud)
         {
             byte baudByte = KwpBaud.ToByte((uint)workingBaud);
@@ -666,7 +952,8 @@ public sealed class Kwp2000Interface : ILogChannel
                 uint newBaud = resp.Data.Length >= 3 ? KwpBaud.FromByte(resp.Data[2]) : (uint)workingBaud;
                 CurrentSession = session;
                 _device.SetBaudRate((int)newBaud); // troca SÓ depois do ack
-                LogMsg(T($"Sessão 0x{(byte)session:X2} OK · baud de trabalho {newBaud}.", $"Session 0x{(byte)session:X2} OK · working baud {newBaud}."));
+                int finalBaud = ConfirmBaudSwitch((int)newBaud);
+                LogMsg(T($"Sessão 0x{(byte)session:X2} OK · baud de trabalho {finalBaud}.", $"Session 0x{(byte)session:X2} OK · working baud {finalBaud}."));
                 return;
             }
             catch (Kwp2000NegativeResponseException ex) when (
@@ -675,7 +962,9 @@ public sealed class Kwp2000Interface : ILogChannel
                     or Kwp2000ResponseCode.ConditionsNotCorrectOrRequestSequenceError)
             {
                 LogMsg(T($"ECU recusou baud {workingBaud} ({ex.ResponseCode}); continua a {InitBaudRate}.", $"ECU refused baud {workingBaud} ({ex.ResponseCode}); staying at {InitBaudRate}."));
-                // continua para a tentativa sem baud
+                // SEM fallback automático para o esquema da ME3.1: numa ME7.3.x o código 0x05 é um byte de baud
+                // válido pela fórmula (7400 baud) — a ECU aceitava e ecoava 0x05, e nós trocávamos para 115200
+                // → ligação perdida. O esquema da ME3.1 só se usa quando a ECU é escolhida (Me31BaudScheme).
             }
         }
 
@@ -690,6 +979,117 @@ public sealed class Kwp2000Interface : ILogChannel
         }
         CurrentSession = session;
         LogMsg(T($"Sessão 0x{(byte)session:X2} OK · {InitBaudRate} baud.", $"Session 0x{(byte)session:X2} OK · {InitBaudRate} baud."));
+    }
+
+    /// <summary>Código de baud da ME3.1 para 115200 no 0x85 (Stilo dump loc_2C70). Código 4 = 57600 se preciso.</summary>
+    public const byte Me31Baud115200Code = 0x05;
+    public const int Me31Baud115200 = 115200;
+
+    /// <summary>
+    /// Usa diretamente o esquema de códigos de baud da ME3.1 no 0x85 (sem tentar primeiro o byte KWP standard,
+    /// que a ME3.1 recusa). Posto pelo flasher quando a ECU escolhida é ME3.1.
+    /// </summary>
+    public bool Me31BaudScheme { get; set; }
+
+    /// <summary>
+    /// Depois de trocar de baud, confirmar com um TesterPresent que a ECU responde ao baud novo (por omissão true).
+    /// A resposta positiva ao 10 xx nem sempre traz o byte de baud (a ME7.3.1 responde só 50 85 e troca; a ME3.1 na
+    /// sessão 0x86 responde 50 86 e NÃO troca), por isso não dá para decidir pela resposta.
+    /// </summary>
+    public bool VerifyBaudSwitch { get; set; } = true;
+
+    /// <summary>Timeout de cada TesterPresent da verificação do baud.</summary>
+    public int BaudCheckTimeoutMs { get; set; } = 500;
+
+    /// <summary>A ECU responde a um TesterPresent ao baud atual? Uma resposta negativa também conta (a ligação está certa).</summary>
+    private bool LinkAnswers()
+    {
+        try { SendRequest(Kwp2000Message.Request(EcuAddress, TesterAddress, Kwp2000Service.TesterPresent), BaudCheckTimeoutMs); return true; }
+        catch (Kwp2000NegativeResponseException) { return true; }
+        catch (Kwp2000Exception) { return false; }
+    }
+
+    /// <summary>
+    /// Confirma a troca de baud: se a ECU não responder ao baud novo (2 tentativas), volta ao baud de init e confirma
+    /// lá — caso da ME3.1 na sessão 0x86, que aceita o 10 86 &lt;baud&gt; mas fica a 10400. Devolve o baud com que ficou.
+    /// </summary>
+    private int ConfirmBaudSwitch(int newBaud)
+    {
+        if (!VerifyBaudSwitch || newBaud == InitBaudRate) return newBaud;
+        if (LinkAnswers() || LinkAnswers()) return newBaud;
+        _device.SetBaudRate(InitBaudRate);
+        if (LinkAnswers())
+        {
+            LogMsg(T($"A ECU aceitou a sessão mas não trocou de baud (sem resposta a {newBaud}): continua a {InitBaudRate}.",
+                     $"The ECU accepted the session but did not switch baud (no answer at {newBaud}): staying at {InitBaudRate}."));
+            return InitBaudRate;
+        }
+        _device.SetBaudRate(newBaud);
+        LogMsg(T($"AVISO: sem resposta ao TesterPresent nem a {newBaud} nem a {InitBaudRate}; fica a {newBaud}.",
+                 $"WARNING: no answer to TesterPresent at {newBaud} nor at {InitBaudRate}; staying at {newBaud}."));
+        return newBaud;
+    }
+
+    /// <summary>Baud recomendado para a ME3.1: 125000 é exato na UART a 24 MHz (24e6/32/6) — o mesmo da ME7.3.1.</summary>
+    public const int Me31RecommendedBaud = 125000;
+
+    /// <summary>
+    /// Parâmetros do 10 85 para um baud no esquema da ME3.1 (Stilo dump loc_2C70): códigos fixos 1=9600, 2=19200,
+    /// 3=38400, 4=57600, 5=115200, 0xFA=187500; qualquer outro vai pelo código 6 com o baud em 3 bytes (big-endian).
+    /// Atenção: a ECU só aceita o baud se a UART (24 MHz) o gerar com erro pequeno — 115200 é recusado (NRC 0x31,
+    /// confirmado no carro); 125000 e 187500 são exatos.
+    /// </summary>
+    public static byte[] Me31BaudParams(int baud)
+    {
+        // 124800 (o valor da ME7.3.x, byte 0x87) pede-se como 125000 exato: é o que a UART gera nas duas ECUs.
+        if (baud == 124800) baud = Me31RecommendedBaud;
+        return baud switch
+        {
+            9600 => new byte[] { 1 }, 19200 => new byte[] { 2 }, 38400 => new byte[] { 3 }, 57600 => new byte[] { 4 },
+            115200 => new byte[] { 5 }, 187500 => new byte[] { 0xFA },
+            _ => new byte[] { 6, (byte)(baud >> 16), (byte)(baud >> 8), (byte)baud },
+        };
+    }
+
+    /// <summary>
+    /// Troca de baud no esquema da ME3.1: 10 &lt;session&gt; &lt;código&gt; [baud em 3 bytes] → &lt;baud&gt;. A ECU responde a
+    /// 10400 (50 85) e só depois ambos mudam. Se a resposta ecoar um byte de baud diferente do pedido, não troca.
+    /// Devolve false (sem trocar) se a ECU recusar ou o interface não aceitar o baud.
+    /// </summary>
+    private bool TryMe31FastBaud(Kwp2000SessionType session, byte[] baudParams, int baud)
+    {
+        byte code = baudParams[0];
+        if (_frameDevice != null)   // J2534: confirmar que o interface aceita o baud antes de pedir
+        {
+            try { _device.SetBaudRate(baud); _device.SetBaudRate(InitBaudRate); }
+            catch (Exception ex)
+            {
+                try { _device.SetBaudRate(InitBaudRate); } catch { }
+                LogMsg(T($"O interface não aceita {baud} baud ({ex.Message}).", $"The interface does not accept {baud} baud ({ex.Message})."));
+                return false;
+            }
+        }
+        try
+        {
+            var resp = SendService(Kwp2000Service.StartDiagnosticSession, new[] { (byte)session }.Concat(baudParams).ToArray());
+            if (resp.Data.Length >= 3 && resp.Data[2] != code)
+            {
+                LogMsg(T($"ECU aceitou mas ecoou código 0x{resp.Data[2]:X2} ≠ 0x{code:X2}: não troco o baud (fica a {InitBaudRate}).",
+                         $"ECU accepted but echoed code 0x{resp.Data[2]:X2} ≠ 0x{code:X2}: not switching baud (staying at {InitBaudRate})."));
+                CurrentSession = session;
+                return true;   // sessão feita, mas sem troca de baud
+            }
+            CurrentSession = session;
+            _device.SetBaudRate(baud);   // troca SÓ depois do ack
+            int finalBaud = ConfirmBaudSwitch(baud);
+            LogMsg(T($"Sessão 0x{(byte)session:X2} OK · baud de trabalho {finalBaud} (esquema ME3.1, código 0x{code:X2}).",
+                     $"Session 0x{(byte)session:X2} OK · working baud {finalBaud} (ME3.1 scheme, code 0x{code:X2})."));
+            return true;
+        }
+        catch (Kwp2000NegativeResponseException)
+        {
+            return false;   // não é ME3.1 (ou não aceita): o chamador continua para 10400
+        }
     }
 
     public void StopDiagnosticSession()
@@ -857,7 +1257,25 @@ public sealed class Kwp2000Interface : ILogChannel
         // seed com 3 bytes (27 <sub> PP). Sem ele responde 7F 27 12 (confirmado na IROM sub_82DF62:
         // o ramo do pedido de seed faz `cmpb Len,#3; jmpa cc_C, <NRC 0x12>`). PP controla também o
         // número de iterações da key (N = PP + 0x23), que o ComputeFiatKey já usa.
-        var seedResp = SendService(Kwp2000Service.SecurityAccess, seedSubFunction, seedParameter);
+        // A ME3.1 (Stilo/Thesis 2.4, outro software no mesmo C167) tem outro nível de acesso: o handler 0x27
+        // (Stilo Dump Origine: sub_31EC, filtro em ~0x2224) só aceita a subfunção se (sub+1)>>1 == 0x2B, ou seja
+        // 0x55 (pedir seed) / 0x56 (enviar key); a subfunção 0x01 dá NRC 0x12. A key usa o MESMO algoritmo
+        // (poly 0x564A4F25, N = 0x23), e ComputeFiatKey(…, 0x55, 0, …) já escolhe esse poly (nível 0x41).
+        // Por isso, se a subfunção configurada der NRC 0x12, tenta-se a 0x55 da ME3.1. A subfunção errada é
+        // recusada ANTES de pedir seed e NÃO gasta tentativas de key — por isso esta deteção é segura.
+        byte effSub = seedSubFunction;
+        byte keyParameter = seedParameter;
+        Kwp2000Message seedResp;
+        try { seedResp = SendService(Kwp2000Service.SecurityAccess, seedSubFunction, seedParameter); }
+        catch (Kwp2000NegativeResponseException ex) when (ex.ResponseCode == Kwp2000ResponseCode.SubFunctionNotSupportedOrInvalidFormat
+                                                          && seedSubFunction != SecurityAccess.Me31SeedSubFunction)
+        {
+            effSub = SecurityAccess.Me31SeedSubFunction;
+            keyParameter = 0;
+            LogMsg(T($"SecurityAccess: a ECU recusou 27 {seedSubFunction:X2} (NRC 0x12); tenta a subfunção 0x{effSub:X2} da ME3.1.",
+                     $"SecurityAccess: the ECU rejected 27 {seedSubFunction:X2} (NRC 0x12); trying the ME3.1 sub-function 0x{effSub:X2}."));
+            seedResp = SendService(Kwp2000Service.SecurityAccess, effSub, keyParameter);
+        }
 
         // Spec Fiat 07223 §6.3: se a ECU já estiver desbloqueada, responde com seed a zeros.
         if (seedResp.Data.Length >= 3 && seedResp.Data.Skip(2).All(b => b == 0))
@@ -873,11 +1291,20 @@ public sealed class Kwp2000Interface : ILogChannel
         uint seed = (uint)(seedResp.Data[2] << 24 | seedResp.Data[3] << 16
                          | seedResp.Data[4] << 8 | seedResp.Data[5]);
 
-        uint key = SecurityAccess.ComputeFiatKey(seed, seedSubFunction, seedParameter, perEcuPoly);
+        uint key = SecurityAccess.ComputeFiatKey(seed, effSub, keyParameter, perEcuPoly);
 
-        byte keySub = (byte)(seedSubFunction + 1);
-        SendService(Kwp2000Service.SecurityAccess, keySub,
-            (byte)(key >> 24), (byte)(key >> 16), (byte)(key >> 8), (byte)key);
+        byte keySub = (byte)(effSub + 1);
+        try
+        {
+            SendService(Kwp2000Service.SecurityAccess, keySub,
+                (byte)(key >> 24), (byte)(key >> 16), (byte)(key >> 8), (byte)key);
+        }
+        catch (Kwp2000NegativeResponseException ex) when ((byte)ex.ResponseCode == 0x35)
+        {
+            // não repetir: cada key errada conta para o bloqueio da ECU
+            throw new Kwp2000Exception(T($"A ECU recusou a key (NRC 0x35, key inválida): o seed foi aceite mas o cálculo da key não é o desta ECU. Não se repete para não bloquear a ECU. Seed {seed:X8}, key enviada {key:X8}.",
+                                         $"The ECU rejected the key (NRC 0x35, invalid key): the seed was accepted but the key calculation is not this ECU's. Not retried, so the ECU does not lock out. Seed {seed:X8}, key sent {key:X8}."));
+        }
     }
 
     /// <summary>

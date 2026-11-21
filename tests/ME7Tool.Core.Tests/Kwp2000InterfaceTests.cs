@@ -61,6 +61,125 @@ public class Kwp2000InterfaceTests
     }
 
     [Fact]
+    public void StartDiagnosticSession_BaudRefused_NoMe31Fallback_StaysAt10400()
+    {
+        var (kwp, dev) = Make();
+        // Sem a ECU ME3.1 escolhida, um baud recusado NÃO tenta o código 0x05: numa ME7.3.x esse byte é 7400 baud
+        // pela fórmula (a ECU aceitava e ecoava-o, e trocávamos para 115200 → ligação perdida).
+        dev.EnqueueResponse(Resp(0x7F, 0x10, (byte)Kwp2000ResponseCode.RequestOutOfRange));   // 10 85 <byte>
+        dev.EnqueueResponse(Resp(0x50, 0x85));                                                 // 10 85
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Programming, 115200);
+
+        Assert.Equal(2, dev.WrittenFrames.Count);
+        Assert.Equal(new byte[] { 0x10, 0x85 }, Kwp2000Message.TryParse(dev.WrittenFrames[1])!.Data);
+        Assert.DoesNotContain(115200, dev.BaudRates);
+        Assert.Equal(Kwp2000SessionType.Programming, kwp.CurrentSession);
+    }
+
+    [Fact]
+    public void StartDiagnosticSession_Me31Scheme_GoesStraightToCode05()
+    {
+        var (kwp, dev) = Make();
+        kwp.Me31BaudScheme = true;   // ECU ME3.1 escolhida: sem tentar o byte 0x87
+        dev.EnqueueResponse(Resp(0x50, 0x85, 0x05));
+        dev.EnqueueResponse(Resp(0x7E));   // TesterPresent da verificação do baud
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Programming, 115200);
+
+        Assert.Equal(0x10, Kwp2000Message.TryParse(dev.WrittenFrames[0])!.Data[0]);
+        Assert.DoesNotContain(dev.WrittenFrames, f => Kwp2000Message.TryParse(f)!.Data.SequenceEqual(new byte[] { 0x10, 0x85, 0x87 }));   // sem a tentativa 0x87
+        Assert.Equal(new byte[] { 0x10, 0x85, 0x05 }, Kwp2000Message.TryParse(dev.WrittenFrames[0])!.Data);
+        Assert.Contains(115200, dev.BaudRates);
+    }
+
+    [Fact]
+    public void StartDiagnosticSession_Me31Scheme_125000_UsesCode06With3ByteBaud()
+    {
+        var (kwp, dev) = Make();
+        kwp.Me31BaudScheme = true;
+        dev.EnqueueResponse(Resp(0x50, 0x85));   // a ME3.1 responde só 50 85 (sem eco do baud)
+        dev.EnqueueResponse(Resp(0x7E));
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Programming, Kwp2000Interface.Me31RecommendedBaud);
+
+        Assert.Equal(new byte[] { 0x10, 0x85, 0x06, 0x01, 0xE8, 0x48 }, Kwp2000Message.TryParse(dev.WrittenFrames[0])!.Data);
+        Assert.Contains(125000, dev.BaudRates);
+    }
+
+    [Fact]
+    public void StartDiagnosticSession_Me31Scheme_124800_RequestedAsExact125000()
+    {
+        var (kwp, dev) = Make();
+        kwp.Me31BaudScheme = true;
+        dev.EnqueueResponse(Resp(0x50, 0x85));
+        dev.EnqueueResponse(Resp(0x7E));
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Programming, 124800);   // o mesmo valor da ME7.3.x na UI
+
+        Assert.Equal(new byte[] { 0x10, 0x85, 0x06, 0x01, 0xE8, 0x48 }, Kwp2000Message.TryParse(dev.WrittenFrames[0])!.Data);
+        Assert.Contains(124800, dev.BaudRates);   // o PC fica a 124800, como na ME7.3.x (0,16 % de 125000)
+    }
+
+    [Fact]
+    public void StartDiagnosticSession_BaudSwitchConfirmed_StaysAtNewBaud()
+    {
+        var (kwp, dev) = Make();
+        dev.EnqueueResponse(Resp(0x50, 0x85));   // a ME7.3.1 responde só 50 85 e troca mesmo de baud
+        dev.EnqueueResponse(Resp(0x7E));         // responde ao TesterPresent ao baud novo
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Programming, 124800);
+
+        Assert.Equal(new byte[] { 0x3E }, Kwp2000Message.TryParse(dev.WrittenFrames[1])!.Data);
+        Assert.Equal(124800, dev.BaudRates[^1]);
+    }
+
+    [Fact]
+    public void StartDiagnosticSession_EcuAcceptsButDoesNotSwitch_RevertsTo10400()
+    {
+        // ME3.1 na sessão 0x86 (Stilo, handler 0x41D70): aceita "10 86 87" com "50 86" mas fica a 10400.
+        var (kwp, dev) = Make();
+        kwp.BaudCheckTimeoutMs = 100;
+        dev.EnqueueResponse(Resp(0x50, 0x86));
+        dev.AutoResponder = req =>
+            req.Data[0] == 0x3E && (dev.BaudRates.Count == 0 || dev.BaudRates[^1] == 10400) ? Resp(0x7E) : null;
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Development, 124800);
+
+        Assert.Equal(10400, dev.BaudRates[^1]);   // voltou a 10400 e a ECU respondeu lá
+        Assert.Equal(Kwp2000SessionType.Development, kwp.CurrentSession);
+    }
+
+    [Fact]
+    public void ResponsePending_WaitsP2Star_NotJustP2()
+    {
+        var (kwp, dev) = Make();   // ResponseTimeoutMs 200 ms neste teste
+        kwp.Timing.ResponsePendingTimeoutMs = 3000;
+        dev.EnqueueResponse(Resp(0x7F, 0x3B, (byte)Kwp2000ResponseCode.ResponsePending));
+        // a resposta final chega ~600 ms depois do 78 (mais do que o P2 de 200 ms, menos do que o P2*)
+        var late = Resp(0x7B, 0x98);
+        _ = Task.Run(async () => { await Task.Delay(600); dev.InjectRx(late); });
+
+        var resp = kwp.SendService(Kwp2000Service.WriteDataByLocalIdentifier, 0x98, 0x20);
+        Assert.True(resp.IsPositiveResponseTo(Kwp2000Service.WriteDataByLocalIdentifier));
+    }
+
+    [Fact]
+    public void StartDiagnosticSession_Me31BaudRefused_StaysAtInitBaud()
+    {
+        var (kwp, dev) = Make();
+        kwp.Me31BaudScheme = true;
+        // ME3.1 escolhida mas o código recusado: cai para 10400 (10 85 sem byte).
+        dev.EnqueueResponse(Resp(0x7F, 0x10, (byte)Kwp2000ResponseCode.RequestOutOfRange));   // 10 85 05
+        dev.EnqueueResponse(Resp(0x50, 0x85));                                                 // 10 85
+
+        kwp.StartDiagnosticSession(Kwp2000SessionType.Programming, 115200);
+
+        Assert.DoesNotContain(115200, dev.BaudRates);
+        Assert.Equal(Kwp2000SessionType.Programming, kwp.CurrentSession);
+    }
+
+    [Fact]
     public void StartDiagnosticSession_SetsCurrentSession()
     {
         var (kwp, dev) = Make();
@@ -96,6 +215,35 @@ public class Kwp2000InterfaceTests
         var keyReq = Kwp2000Message.TryParse(dev.WrittenFrames[1]);
         Assert.NotNull(keyReq);
         Assert.Equal(new byte[] { 0x27, 0x02, 0x21, 0xB2, 0x25, 0x96 }, keyReq!.Data);
+    }
+
+    [Fact]
+    public void SecurityAccessUnlock_Nrc12_RetriesMe31SubFunction0x55()
+    {
+        var (kwp, dev) = Make();
+        // ME3.1 (car log 2026-11-21 + Stilo Dump Origine sub_31EC): 27 01 → 7F 27 12. A subfunção certa é 0x55
+        // (pedir seed) / 0x56 (enviar key), mesmo poly por-ECU e N = 0x23 → mesma key que a 0x01.
+        dev.EnqueueResponse(Resp(0x7F, 0x27, 0x12));
+        dev.EnqueueResponse(Resp(0x67, 0x55, 0x1A, 0x2B, 0x3C, 0x4D));
+        dev.EnqueueResponse(Resp(0x67, 0x56));
+
+        kwp.SecurityAccessUnlock(seedSubFunction: 0x01);
+
+        Assert.Equal(new byte[] { 0x27, 0x01, 0x00 }, Kwp2000Message.TryParse(dev.WrittenFrames[0])!.Data);
+        Assert.Equal(new byte[] { 0x27, 0x55, 0x00 }, Kwp2000Message.TryParse(dev.WrittenFrames[1])!.Data);
+        Assert.Equal(new byte[] { 0x27, 0x56, 0x21, 0xB2, 0x25, 0x96 }, Kwp2000Message.TryParse(dev.WrittenFrames[2])!.Data);
+    }
+
+    [Fact]
+    public void SecurityAccessUnlock_InvalidKey_NotRetried()
+    {
+        var (kwp, dev) = Make();
+        dev.EnqueueResponse(Resp(0x67, 0x01, 0x1A, 0x2B, 0x3C, 0x4D));
+        dev.EnqueueResponse(Resp(0x7F, 0x27, 0x35));
+
+        var ex = Assert.Throws<Kwp2000Exception>(() => kwp.SecurityAccessUnlock(seedSubFunction: 0x01));
+        Assert.Contains("0x35", ex.Message);
+        Assert.Equal(2, dev.WrittenFrames.Count);
     }
 
     [Fact]
