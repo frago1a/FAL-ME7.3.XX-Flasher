@@ -4,7 +4,7 @@
 
 The keys and algorithms below were recovered by reverse engineering for interoperability.
 
-This document explains what the **FAL ME7.3.XX Flasher** does when it reprograms an ECU over the OBD
+This document explains what the **FAL ME7.3.1/H4/ME3.1 Flasher** does when it reprograms an ECU over the OBD
 port, why it was hard to get working, and what can go wrong. It is based on the disassembly of the ECU
 firmware (internal ROM and application) and on tests on a real ECU.
 

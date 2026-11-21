@@ -172,6 +172,15 @@ public sealed class Flasher
             Log(T($"Apagar {eraseRange}: concluído{ResultText(res)}. A partir daqui a ECU não tem aplicação até acabar.",
                   $"Erase {eraseRange}: done{ResultText(res)}. From here on the ECU has no application until it finishes."));
         }
+        catch (Kwp2000NegativeResponseException ex) when (ex.ResponseCode == Kwp2000ResponseCode.SecurityAccessDenied)
+        {
+            // visto na ME3.1 em bancada com a EEPROM casada: o seed/key passa, mas o apagar é recusado sem o imobilizador
+            throw new InvalidOperationException(T(
+                "A ECU recusou apagar (7F 31 33, acesso negado) depois do seed/key: o imobilizador não está a autorizar. " +
+                "Com a EEPROM casada só se programa no carro com a chave reconhecida (ou com a ECU virgem); em bancada usa o modo BSL. Nada foi apagado.",
+                "The ECU refused to erase (7F 31 33, access denied) after seed/key: the immobilizer is not authorizing. " +
+                "With a paired EEPROM it can only be programmed in the car with the key recognized (or a virgin ECU); on the bench use BSL mode. Nothing was erased."), ex);
+        }
         finally { _opt.RoutineTimeoutMs = savedTimeout; }
 
         Report(FlashPhase.Writing, 0, total, T($"A escrever {total / 1024} KB (cifrados)...", $"Writing {total / 1024} KB (encrypted)..."));

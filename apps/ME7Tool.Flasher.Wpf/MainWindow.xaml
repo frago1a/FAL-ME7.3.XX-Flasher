@@ -1,7 +1,8 @@
 ﻿<Window x:Class="ME7Tool.Flasher.Wpf.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="FAL ME7.3.xx / ME3.1 Flasher" Height="680" Width="960" Closing="Window_Closing"
+        xmlns:local="clr-namespace:ME7Tool.Flasher.Wpf"
+        Title="FAL ME7.3.1/H4/ME3.1 Flasher" Height="680" Width="960" Closing="Window_Closing"
         Background="#1E1E1E" Foreground="#E0E0E0" FontFamily="Segoe UI" FontSize="13">
     <Window.Resources>
         <Style TargetType="Button">
@@ -39,6 +40,12 @@
 
         <!-- Barra de ligação -->
         <WrapPanel Grid.Row="0" VerticalAlignment="Center">
+            <TextBlock Text="Modo:" VerticalAlignment="Center" Margin="4"/>
+            <ComboBox x:Name="cmbMode" Width="70" Margin="4" SelectedIndex="0" SelectionChanged="cmbMode_Changed"
+                      ToolTip="OBD: ligar e gravar pela ficha de diagnóstico (K-line, KWP2000). BSL: modo boot do C167 (pino de boot), para ler a flash, a ROM interna e a EEPROM.">
+                <ComboBoxItem>OBD</ComboBoxItem>
+                <ComboBoxItem>BSL</ComboBoxItem>
+            </ComboBox>
             <TextBlock Text="Interface:" VerticalAlignment="Center" Margin="4"/>
             <ComboBox x:Name="cmbIface" Width="90" Margin="4" SelectedIndex="1" SelectionChanged="cmbIface_Changed">
                 <ComboBoxItem>Série</ComboBoxItem>
@@ -49,6 +56,7 @@
             <ComboBox x:Name="cmbPort" Width="100" Margin="4"/>
             <ComboBox x:Name="cmbJ2534" Width="150" Margin="4" Visibility="Collapsed" ToolTip="Dispositivo J2534 registado no Windows"/>
             <Button Content="⟳" Width="30" Click="btnRefresh_Click" ToolTip="Atualizar portas e dispositivos"/>
+            <StackPanel x:Name="pnlObdBar" Orientation="Horizontal">
             <TextBlock Text="Baud flash:" VerticalAlignment="Center" Margin="4"
                        ToolTip="O init é sempre a 10400. Este baud é pedido no StartDiagnosticSession 0x85; se a ECU recusar, fica a 10400."/>
             <ComboBox x:Name="cmbBaud" IsEditable="True" Text="124800" Width="85" Margin="2">
@@ -76,6 +84,7 @@
             <TextBlock x:Name="lblStatus" Text="Desligado" VerticalAlignment="Center" Margin="10,4" Foreground="#C0A000"/>
             <TextBlock x:Name="lblBattery" VerticalAlignment="Center" Margin="0,4,10,4" Visibility="Collapsed"
                        ToolTip="Tensão da bateria no pino 16 da ficha OBD, medida pelo interface J2534 (não pela ECU). Para programar convém ≥ 12 V, de preferência com carregador."/>
+            </StackPanel>
             <TextBlock Text="Língua:" VerticalAlignment="Center" Margin="16,4,4,4"/>
             <ComboBox x:Name="cmbLang" Width="90" Margin="2" SelectionChanged="cmbLang_SelectionChanged">
                 <ComboBoxItem>Português</ComboBoxItem><ComboBoxItem>English</ComboBoxItem>
@@ -90,8 +99,9 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0">
-                <GroupBox Header="ECU">
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <GroupBox x:Name="grpEcu" Header="ECU">
                     <TextBlock x:Name="lblInfo" TextWrapping="Wrap" Text="(ligar para ler a identificação)"/>
                 </GroupBox>
                 <GroupBox Header="Ferramentas">
@@ -102,7 +112,7 @@
                                 ToolTip="Abre um .BIN cifrado do Examiner (512 KB, ex.: BO010109.BIN) e grava a versão desencriptada (_dec.bin) ao lado. Não precisa de ligação à ECU."/>
                     </StackPanel>
                 </GroupBox>
-                <GroupBox Header="Ficheiros originais (Examiner)">
+                <GroupBox x:Name="grpExaminer" Header="Ficheiros originais (Examiner)">
                     <StackPanel>
                         <Button x:Name="btnExaminerFolder" Content="Pasta do Examiner…" Click="btnExaminerFolder_Click"
                                 ToolTip="Escolhe a pasta completa do Examiner (com o Global.ndb). Depois de ligar, o flasher procura a ECU pela identificação (nº Bosch e software) e diz se há um original mais recente."/>
@@ -114,9 +124,94 @@
                                 ToolTip="Procura um original pelo nº Bosch, software, desenho Fiat ou nome do ficheiro, sem precisar de ECU. Dá para o usar no flash ou extraí-lo desencriptado."/>
                     </StackPanel>
                 </GroupBox>
+                <GroupBox x:Name="grpBslOptions" Header="Opções da gravação (BSL)" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="Antes de gravar:" Margin="2,0,0,2"/>
+                        <ComboBox x:Name="cmbBslCompare" SelectedIndex="0" SelectionChanged="cmbBslCompare_Changed" PreviewMouseWheel="Combo_PreviewMouseWheel"
+                                  ToolTip="Comparar com um ficheiro lido por ti: rápido, grava só os sectores que mudam; confirma-se só que a identificação do ficheiro é a da ECU. Ler a ECU: lê a flash toda primeiro (backup e comparação exata), demora mais ~50 s. Não comparar: apaga e grava os sectores todos. Na EEPROM: &quot;Não comparar&quot; grava os 1024 bytes sem a ler; as outras leem-na e gravam só os bytes que mudam.">
+                            <ComboBoxItem>Comparar com um ficheiro lido por mim</ComboBoxItem>
+                            <ComboBoxItem>Ler a ECU (backup e comparação)</ComboBoxItem>
+                            <ComboBoxItem>Não comparar (grava tudo)</ComboBoxItem>
+                        </ComboBox>
+                        <StackPanel x:Name="pnlBslRef" Margin="0,6,0,0">
+                            <TextBlock Text="Lido da ECU:" Margin="2,0,0,2"/>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="..." Width="34" Click="btnBrowseBslRef_Click"/>
+                                <TextBox x:Name="txtBslRef" ToolTip="Leitura de 512 KB do que está agora na ECU (por exemplo o backup feito por BSL)."/>
+                            </DockPanel>
+                        </StackPanel>
+                        <CheckBox x:Name="chkBslSaveBackup" Content="Guardar o que se lê antes de gravar (pede a pasta)" IsChecked="False" Margin="2,6,0,0"
+                                  ToolTip="Guarda num ficheiro o que se lê antes de gravar: a EEPROM (é sempre lida para comparar) e a flash quando a opção é &quot;Ler a ECU&quot; (nas outras opções a flash não se lê). Se já fizeste um backup, não é preciso."/>
+                        <CheckBox x:Name="chkBslVerify" Content="Verificar depois de gravar" IsChecked="True" Margin="2,8,0,0"
+                                  ToolTip="Relê os sectores gravados e compara-os com o ficheiro (leva quase tanto tempo como a gravação)."/>
+                    </StackPanel>
+                </GroupBox>
             </StackPanel>
+            </ScrollViewer>
 
-            <GroupBox Grid.Column="1" Header="Flash completo por OBD (como o Examiner)">
+            <GroupBox x:Name="grpBsl" Grid.Column="1" Header="Modo boot (BSL)" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <Border Background="#10283A" BorderBrush="#3C8CC0" BorderThickness="1" Padding="6" Margin="0,0,0,8">
+                        <TextBlock TextWrapping="Wrap" Foreground="#A8D4F0"
+                                   Text="Para entrar em modo boot: com a ECU sem alimentação, liga o pino de boot à massa, liga a alimentação e só depois carrega num botão. O cabo KKL (FTDI ou Série) fica na K-line; o J2534 não serve para o modo boot. Se a ECU já estiver em modo boot de uma leitura anterior, não é preciso repetir."/>
+                    </Border>
+                    <Expander Header="Ligações do modo boot" IsExpanded="True" Margin="0,0,0,8" Foreground="#E0E0E0">
+                        <StackPanel Margin="4,4,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <RadioButton x:Name="rbWireMe731" Content="ME7.3.1 / ME3.1" IsChecked="True" Checked="rbWire_Checked" Margin="0,0,16,0" Foreground="#E0E0E0"/>
+                                <RadioButton x:Name="rbWireH4" Content="ME7.3H4" Checked="rbWire_Checked" Foreground="#E0E0E0"/>
+                            </StackPanel>
+                            <local:BslWiringDiagram x:Name="bslDiagram" HorizontalAlignment="Left"/>
+                            <TextBlock TextWrapping="Wrap" Foreground="#A0A0A0" Margin="0,4,0,0"
+                                       Text="Desenho esquemático (vista com a etiqueta em baixo à direita): as posições são aproximadas, confirma sempre pelo número do pino. O +12V e a massa vêm de uma fonte de bancada; a K-line liga ao cabo KKL."/>
+                        </StackPanel>
+                    </Expander>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Baud:" VerticalAlignment="Center" Margin="2,0,4,0"/>
+                        <ComboBox x:Name="cmbBslBaud" IsEditable="True" Text="125000" Width="80"
+                                  ToolTip="Baud do modo boot (a ECU mede-o sozinha). 125000 é exato na UART do C167 (20 e 24 MHz); 115200 não é. Se der erros, baixa para 57600.">
+                            <ComboBoxItem>9600</ComboBoxItem><ComboBoxItem>19200</ComboBoxItem>
+                            <ComboBoxItem>38400</ComboBoxItem><ComboBoxItem>57600</ComboBoxItem>
+                            <ComboBoxItem>62500</ComboBoxItem><ComboBoxItem>125000</ComboBoxItem>
+                        </ComboBox>
+                    </StackPanel>
+                    <Button x:Name="btnBslIdent" Content="Ligar e identificar" Click="btnBslRead_Click" Height="32" Margin="4,10,4,4"
+                            ToolTip="Entra em modo boot e lê só o bloco de identificação da flash (HW, software, versão, desenho Fiat e família ME3.1/ME7.3.1). Demora uma fração de segundo."/>
+                    <Button x:Name="btnBslBackup" Content="Backup completo (flash + ROM interna + EEPROM)…" Click="btnBslRead_Click" Height="36"
+                            FontWeight="Bold" Background="#2E5B8B"
+                            ToolTip="Identifica e lê tudo de seguida: flash externa (512 KB), ROM interna (32 KB) e EEPROM (1 KB). Grava numa pasta, com o software no nome dos ficheiros e um info.txt com a identificação."/>
+                    <TextBlock Text="Ler só uma parte (não escreve nada na ECU):" Margin="0,10,0,2"/>
+                    <Button x:Name="btnBslFlash" Content="Ler flash externa (512 KB)…" Click="btnBslRead_Click" Height="32"
+                            ToolTip="Lê os 512 KB da flash externa (arranque incluído) por modo boot e grava-os num ficheiro."/>
+                    <Button x:Name="btnBslIrom" Content="Ler ROM interna (32 KB)…" Click="btnBslRead_Click" Height="32"
+                            ToolTip="Lê os 32 KB da ROM interna do C167 por modo boot e grava-os num ficheiro."/>
+                    <Button x:Name="btnBslEeprom" Content="Ler EEPROM 95080 (1 KB)…" Click="btnBslRead_Click" Height="32"
+                            ToolTip="Lê a EEPROM SPI 95080 (chip-select P4.7, como nas ME7.3 e ME3.1 da Fiat) por modo boot e grava-a num ficheiro."/>
+                    <TextBlock Text="Gravar a flash externa (512 KB com checksums corrigidos, ou original do Examiner):" TextWrapping="Wrap" Margin="0,12,0,2"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Width="34" Click="btnBrowseBsl_Click"/>
+                        <TextBox x:Name="txtBslFile"/>
+                    </DockPanel>
+                    <Button x:Name="btnBslWrite" Content="Gravar flash por BSL…" Click="btnBslWrite_Click" Height="36" Margin="4,6,4,4"
+                            FontWeight="Bold" Background="#8B2E2E"
+                            ToolTip="Apaga e grava os sectores conforme as opções da gravação (à esquerda). Só aceita a flash Am29F400BB. O modo boot não confirma checksums: o ficheiro tem de estar correto."/>
+                    <TextBlock Text="Gravar a EEPROM 95080 (ficheiro de 1 KB):" Margin="0,12,0,2"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Width="34" Click="btnBrowseBslEeprom_Click"/>
+                        <TextBox x:Name="txtBslEepromFile"/>
+                    </DockPanel>
+                    <Button x:Name="btnBslEepromWrite" Content="Gravar EEPROM por BSL…" Click="btnBslEepromWrite_Click" Height="32" Margin="4,6,4,4"
+                            FontWeight="Bold" Background="#8B2E2E"
+                            ToolTip="Segue as opções da gravação (à esquerda): compara e grava só os bytes que mudam, ou grava tudo com &quot;Não comparar&quot;; verifica se &quot;Verificar&quot; estiver ligado. Demora poucos segundos."/>
+                    <Button x:Name="btnBslRestore" Content="Repor backup (flash + EEPROM)…" Click="btnBslRestore_Click" Height="36" Margin="4,12,4,4"
+                            FontWeight="Bold" Background="#8B2E2E"
+                            ToolTip="Escolhe um ficheiro de um backup completo (…_info.txt, …_flash.bin ou …_eeprom.bin): grava a flash e depois a EEPROM desse backup, com as opções da gravação (à esquerda). A ROM interna não se grava (é OTP)."/>
+                </StackPanel>
+                </ScrollViewer>
+            </GroupBox>
+
+            <GroupBox x:Name="grpObd" Grid.Column="1" Header="Flash completo por OBD (como o Examiner)">
                 <StackPanel>
                     <Border Background="#3A2E10" BorderBrush="#C0A000" BorderThickness="1" Padding="6" Margin="0,0,0,8">
                         <TextBlock TextWrapping="Wrap" Foreground="#F0D060"

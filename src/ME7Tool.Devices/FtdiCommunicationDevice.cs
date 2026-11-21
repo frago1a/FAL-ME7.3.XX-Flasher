@@ -8,7 +8,7 @@ namespace ME7Tool.Devices;
 /// Backend K-line sobre FTDI D2XX (ftd2xx.dll). Suporta baud não-standard (10400, 124800)
 /// e break preciso para fast/5-baud init. Requer o driver FTDI D2XX instalado.
 /// </summary>
-public sealed class FtdiCommunicationDevice : ICommunicationDevice
+public sealed class FtdiCommunicationDevice : ICommunicationDevice, IModemLines
 {
     private IntPtr _handle = IntPtr.Zero;
     private readonly int _index;
@@ -99,6 +99,9 @@ public sealed class FtdiCommunicationDevice : ICommunicationDevice
         else FT_SetBreakOff(_handle);
     }
 
+    public void SetDtr(bool on) => Check(on ? FT_SetDtr(_handle) : FT_ClrDtr(_handle), on ? "FT_SetDtr" : "FT_ClrDtr");
+    public void SetRts(bool on) => Check(on ? FT_SetRts(_handle) : FT_ClrRts(_handle), on ? "FT_SetRts" : "FT_ClrRts");
+
     public void Dispose() => Close();
 
     private static void Check(uint status, string op)
@@ -124,4 +127,8 @@ public sealed class FtdiCommunicationDevice : ICommunicationDevice
     [DllImport("ftd2xx.dll")] private static extern uint FT_SetLatencyTimer(IntPtr handle, byte ms);
     [DllImport("ftd2xx.dll")] private static extern uint FT_SetUSBParameters(IntPtr handle, uint inTransferSize, uint outTransferSize);
     [DllImport("ftd2xx.dll")] private static extern uint FT_GetQueueStatus(IntPtr handle, out uint rxBytes);
+    [DllImport("ftd2xx.dll")] private static extern uint FT_SetDtr(IntPtr handle);
+    [DllImport("ftd2xx.dll")] private static extern uint FT_ClrDtr(IntPtr handle);
+    [DllImport("ftd2xx.dll")] private static extern uint FT_SetRts(IntPtr handle);
+    [DllImport("ftd2xx.dll")] private static extern uint FT_ClrRts(IntPtr handle);
 }

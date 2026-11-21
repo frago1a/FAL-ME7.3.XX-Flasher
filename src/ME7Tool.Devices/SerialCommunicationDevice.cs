@@ -7,7 +7,7 @@ namespace ME7Tool.Devices;
 /// Backend K-line sobre uma porta série (cabo KKL em COM virtual). Amplamente compatível.
 /// O fast-init usa BreakState; o 5-baud não é fiável por série (preferir FTDI/J2534 para 5-baud).
 /// </summary>
-public sealed class SerialCommunicationDevice : ICommunicationDevice
+public sealed class SerialCommunicationDevice : ICommunicationDevice, IModemLines
 {
     private readonly SerialPort _port;
 
@@ -66,6 +66,9 @@ public sealed class SerialCommunicationDevice : ICommunicationDevice
     {
         try { _port.BreakState = enabled; } catch { /* nem todos os drivers suportam */ }
     }
+
+    public void SetDtr(bool on) => _port.DtrEnable = on;
+    public void SetRts(bool on) => _port.RtsEnable = on;
 
     public void Dispose() => _port.Dispose();
 }

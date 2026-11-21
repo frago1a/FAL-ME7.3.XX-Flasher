@@ -6,4 +6,9 @@
     <AssemblyName>ME7Tool.Core</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Modo boot (BSL) do C167: loader + kernel Minimon e driver de EEPROM SPI (origem e licença em Bsl/Resources/NOTICE.txt). -->
+    <EmbeddedResource Include="Bsl\Resources\*.bin" LogicalName="Bsl.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

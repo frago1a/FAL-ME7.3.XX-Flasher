@@ -670,7 +670,7 @@ public sealed class Kwp2000Interface : ILogChannel
     /// </summary>
     public Kwp2000Message SendRequest(Kwp2000Message request, int? responseTimeoutMs = null)
     {
-        try { return SendRequestCore(request, responseTimeoutMs); }
+        try { return SendRequestStaleRetry(request, responseTimeoutMs); }
         catch (Kwp2000TimeoutException) when (AdaptiveFrameP1 && _frameDevice != null && FrameP1 < FrameP1Fallback && _traceRxRawN == 0)
         {
             int prevFloor = _frameP1Floor;
@@ -699,8 +699,27 @@ public sealed class Kwp2000Interface : ILogChannel
         }
     }
 
+    /// <summary>
+    /// Se o pedido recebeu uma resposta atrasada de outro pedido (descartada) e depois ficou sem a sua, a ECU ignorou-o
+    /// (estava a enviar a resposta antiga — visto na ME3.1 com pedidos seguidos sem P3min): repete-se uma vez, se for
+    /// só de leitura.
+    /// </summary>
+    private Kwp2000Message SendRequestStaleRetry(Kwp2000Message request, int? responseTimeoutMs)
+    {
+        try { return SendRequestCore(request, responseTimeoutMs); }
+        catch (Kwp2000TimeoutException) when (_lastRequestHadStale && IsSafeToRepeat(request))
+        {
+            LogMsg(T("A ECU respondeu com a resposta de um pedido anterior e não à deste: repete-se o pedido.",
+                     "The ECU answered with the reply to an earlier request and not to this one: repeating the request."));
+            return SendRequestCore(request, responseTimeoutMs);
+        }
+    }
+
+    private bool _lastRequestHadStale;
+
     private Kwp2000Message SendRequestCore(Kwp2000Message request, int? responseTimeoutMs)
     {
+        _lastRequestHadStale = false;
         byte[] frame = request.Encode();
         if (PurgeBeforeEachRequest) { _device.DiscardBuffers(); _rxCount = 0; _rxPos = 0; }
 
@@ -723,6 +742,7 @@ public sealed class Kwp2000Interface : ILogChannel
             long t2 = Stopwatch.GetTimestamp();
 
             int timeout = responseTimeoutMs ?? Timing.ResponseTimeoutMs;
+            int staleReplies = 0;
             while (true)
             {
                 var resp = ReadFrame(timeout, out long firstByteTicks);
@@ -733,6 +753,17 @@ public sealed class Kwp2000Interface : ILogChannel
                     // ECU pediu para esperar: voltar a ler, agora com P2* (a resposta final pode levar segundos,
                     // ex.: a ME3.1 a gravar o tester code na EEPROM respondeu 7B 98 ~2 s depois do 78).
                     timeout = Math.Max(timeout, Timing.ResponsePendingTimeoutMs);
+                    continue;
+                }
+                if (IsStaleReply(request, resp))
+                {
+                    // resposta atrasada de um pedido anterior (ex.: a ME3.1 respondeu ao 1A 91 depois do timeout e a
+                    // resposta foi lida como a do 1A 92): deita-se fora e espera-se pela deste pedido
+                    LogMsg(T($"Descartada uma resposta atrasada de outro pedido ({Convert.ToHexString(resp.Data.AsSpan(0, Math.Min(resp.Data.Length, 8)))}…).",
+                             $"Discarded a late reply to another request ({Convert.ToHexString(resp.Data.AsSpan(0, Math.Min(resp.Data.Length, 8)))}…)."));
+                    _lastRequestHadStale = true;
+                    if (++staleReplies > MaxStaleReplies)
+                        throw new Kwp2000Exception(T("Respostas que não correspondem ao pedido.", "Replies that do not match the request."));
                     continue;
                 }
                 LastEcuActivity = t3;
@@ -769,6 +800,21 @@ public sealed class Kwp2000Interface : ILogChannel
             Resync();
             throw;
         }
+    }
+
+    private const int MaxStaleReplies = 3;
+
+    /// <summary>
+    /// true se a resposta é claramente de outro pedido: serviço diferente (positiva SID+0x40, negativa 7F SID) ou, no
+    /// ReadECUIdentification (0x1A), outra opção — a norma manda ecoar a opção (5A opção …).
+    /// </summary>
+    private static bool IsStaleReply(Kwp2000Message request, Kwp2000Message resp)
+    {
+        if (request.Data.Length == 0 || resp.Data.Length == 0) return false;
+        byte sid = request.Data[0];
+        if (resp.IsNegativeResponse) return resp.NegativeRequestServiceId is byte n && n != sid;
+        if (resp.Data[0] != (byte)(sid + 0x40)) return true;
+        return sid == 0x1A && request.Data.Length > 1 && resp.Data.Length > 1 && resp.Data[1] != request.Data[1];
     }
 
     /// <summary>Espera a linha ficar em silêncio (≥ interbyte timeout) e limpa os buffers.</summary>

@@ -34,6 +34,40 @@ public class Kwp2000InterfaceTests
     }
 
     [Fact]
+    public void LateReplyToPreviousRequest_IsDiscarded()
+    {
+        // ME3.1 (2026-11-21): a resposta ao 1A 92 chegou atrasada e foi lida como a do 1A 94 → SW = número de HW
+        var (kwp, dev) = Make();
+        var hw = System.Text.Encoding.ASCII.GetBytes("0261206655");
+        var sw = System.Text.Encoding.ASCII.GetBytes("1277356595");
+        dev.EnqueueResponse(Concat(Resp(new byte[] { 0x5A, 0x92 }.Concat(hw).ToArray()),
+                                   Resp(new byte[] { 0x5A, 0x94 }.Concat(sw).ToArray())));
+
+        Assert.Equal(sw, kwp.ReadEcuIdentification(EcuIdentificationOption.EcuSoftwareNumber));
+    }
+
+    [Fact]
+    public void StaleReplyThenSilence_ReadIsRepeatedOnce()
+    {
+        // ME3.1 (2026-11-21): a 1A 94 respondeu 5A 92 (resposta anterior) e depois nada → repete-se e vem a certa
+        var (kwp, dev) = Make();
+        var hw = System.Text.Encoding.ASCII.GetBytes("0261206655");
+        var sw = System.Text.Encoding.ASCII.GetBytes("1277356574");
+        dev.EnqueueResponse(Resp(new byte[] { 0x5A, 0x92 }.Concat(hw).ToArray()));   // 1.º envio: só a resposta antiga
+        dev.EnqueueResponse(Resp(new byte[] { 0x5A, 0x94 }.Concat(sw).ToArray()));   // repetição: a certa
+
+        Assert.Equal(sw, kwp.ReadEcuIdentification(EcuIdentificationOption.EcuSoftwareNumber));
+    }
+
+    [Fact]
+    public void LateReplyOfOtherService_IsDiscarded()
+    {
+        var (kwp, dev) = Make();
+        dev.EnqueueResponse(Concat(Resp(0x7E), Resp(0x50, 0x85)));   // TesterPresent atrasado, depois a resposta certa
+        Assert.Equal(0x85, kwp.SendService(Kwp2000Service.StartDiagnosticSession, 0x85).Data[1]);
+    }
+
+    [Fact]
     public void NegativeResponse_Throws()
     {
         var (kwp, dev) = Make();

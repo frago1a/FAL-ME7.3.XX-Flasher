@@ -18,6 +18,8 @@ artifacts/
 *.bin
 *.ori
 *.orig
+# exceção: loader, kernel e drivers do modo boot (código, não dados de ECU)
+!src/ME7Tool.Core/Bsl/Resources/*.bin
 
 # Textos extraídos das specs (reconstruíveis a partir dos PDFs)
 fiat_docs/

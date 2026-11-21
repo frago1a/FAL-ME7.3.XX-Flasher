@@ -9,10 +9,9 @@ using static ME7Tool.Core.Common.Lang;
 
 namespace ME7Tool.Flasher.Wpf;
 
-/// <summary>Janela "Sobre": versão, autor, licença, créditos e aviso.</summary>
+/// <summary>Janela "Sobre": versão, capacidades, licença, créditos e aviso.</summary>
 public sealed class AboutWindow : Window
 {
-    public const string Author = "";
     public const string RepoUrl = "https://github.com/frago1a/FAL-ME7.3.XX-Flasher";
 
     private static readonly Brush Bg = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
@@ -42,16 +41,21 @@ public sealed class AboutWindow : Window
         DockPanel.SetDock(icon, Dock.Left);
         head.Children.Add(icon);
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        titles.Children.Add(new TextBlock { Text = "FAL ME7.3.XX Flasher", FontSize = 20, FontWeight = FontWeights.SemiBold });
+        titles.Children.Add(new TextBlock { Text = "FAL ME7.3.1/H4/ME3.1 Flasher", FontSize = 20, FontWeight = FontWeights.SemiBold });
         titles.Children.Add(new TextBlock { Text = T($"Versão {version}", $"Version {version}"), Foreground = Dim });
         head.Children.Add(titles);
         root.Children.Add(head);
 
         root.Children.Add(Para(T(
-            "Flasher por OBD (K-line, KWP2000) para as centralinas Bosch ME7.3.1 e ME3.1 da Fiat, Alfa Romeo e Lancia.",
-            "OBD flasher (K-line, KWP2000) for the Bosch ME7.3.1 and ME3.1 ECUs of Fiat, Alfa Romeo and Lancia.")));
+            "Flasher para as centralinas Bosch ME7.3.1 / H4 / ME3.1 da Fiat, Alfa Romeo e Lancia (C167, flash Am29F400BB).",
+            "Flasher for the Bosch ME7.3.1 / H4 / ME3.1 ECUs of Fiat, Alfa Romeo and Lancia (C167, Am29F400BB flash).")));
+        root.Children.Add(Para(T(
+            "• OBD (K-line, KWP2000): flash completo como o Examiner, seletor de ECU, originais do Examiner (procura, desencriptação).\n" +
+            "• Modo boot (BSL): identificação, backup completo (flash, ROM interna, EEPROM), gravação da flash (só os sectores que mudam, com verificação), gravação da EEPROM 95080 e reposição de backups.",
+            "• OBD (K-line, KWP2000): full flash like the Examiner, ECU selector, Examiner originals (search, decryption).\n" +
+            "• Boot mode (BSL): identification, full backup (flash, internal ROM, EEPROM), flash write (only the sectors that change, with verification), EEPROM 95080 write and backup restore.")));
 
-        root.Children.Add(new TextBlock { Text = $"© 2026 {Author}", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 2) });
+        root.Children.Add(new TextBlock { Text = "© 2026", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 2) });
         var link = new Hyperlink(new Run(RepoUrl)) { NavigateUri = new Uri(RepoUrl), Foreground = Link };
         link.RequestNavigate += (_, e) =>
         {
@@ -66,11 +70,14 @@ public sealed class AboutWindow : Window
         root.Children.Add(Para(T(
             "O procedimento de flash, o algoritmo de segurança e a cifra foram obtidos por engenharia inversa, para interoperabilidade. O seed/key foi confirmado com as ferramentas open source do NefMoto.",
             "The flash procedure, the security algorithm and the encryption were obtained by reverse engineering, for interoperability. The seed/key was cross-checked with the open-source NefMoto tools.")));
+        root.Children.Add(Para(T(
+            "Modo boot: loader e kernel do Minimon (Infineon) e drivers da flash e da EEPROM do projeto C167BootTool (GPL-3.0), que se inspira no ArgDub, 360trev e Gremlin.",
+            "Boot mode: Minimon (Infineon) loader and kernel and the flash and EEPROM drivers from the C167BootTool project (GPL-3.0), itself inspired by ArgDub, 360trev and Gremlin.")));
 
         root.Children.Add(new TextBlock
         {
-            Text = T("⚠ Usa por tua conta e risco: o flash apaga a ECU. Lê a documentação antes de usar.",
-                     "⚠ Use at your own risk: flashing erases the ECU. Read the documentation before using it."),
+            Text = T("⚠ Usa por tua conta e risco: gravar (por OBD ou BSL) apaga a ECU. Faz backup e lê a documentação antes de usar.",
+                     "⚠ Use at your own risk: writing (by OBD or BSL) erases the ECU. Make a backup and read the documentation before using it."),
             TextWrapping = TextWrapping.Wrap, Foreground = Warn, Margin = new Thickness(0, 4, 0, 14),
         });
 

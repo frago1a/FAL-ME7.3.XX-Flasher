@@ -102,10 +102,10 @@ public class J2534KLineTests
     /// <summary>ECU tipo ME3.1: com P1max &lt; 20 ms o interface deita fora as respostas longas (medido no carro).</summary>
     private static void LoseLongRepliesBelowP1_20(FakeFrameDevice dev)
     {
-        var id = new byte[] { 0x5A, 0x92 }.Concat(System.Text.Encoding.ASCII.GetBytes("0261206655 ")).ToArray();
+        static byte[] Id(byte option) => new byte[] { 0x5A, option }.Concat(System.Text.Encoding.ASCII.GetBytes("0261206655 ")).ToArray();
         dev.Ecu = req => req.Data[0] switch
         {
-            0x1A => dev.Timing?.P1 >= 20 ? FakeFrameDevice.Frame(new byte[] { (byte)(0x80 | id.Length), 0xF1, 0x10 }.Concat(id).ToArray()) : null,
+            0x1A => dev.Timing?.P1 >= 20 ? FakeFrameDevice.Frame(new byte[] { (byte)(0x80 | Id(req.Data[1]).Length), 0xF1, 0x10 }.Concat(Id(req.Data[1])).ToArray()) : null,
             0x3B => dev.Timing?.P1 >= 20 ? FakeFrameDevice.Frame(0x82, 0xF1, 0x10, 0x7B, 0x98) : null,
             0x3E => FakeFrameDevice.Frame(0x81, 0xF1, 0x10, 0x7E),
             _ => null,

@@ -1,5 +1,5 @@
 # Flasher — textos fixos da janela: português<TAB>inglês
-FAL ME7.3.xx / ME3.1 Flasher	FAL ME7.3.xx / ME3.1 Flasher
+FAL ME7.3.1/H4/ME3.1 Flasher	FAL ME7.3.1/H4/ME3.1 Flasher
 Interface:	Interface:
 Porta:	Port:
 Atualizar portas	Refresh ports
@@ -51,3 +51,43 @@ Sobre…	About…
 Versão, autor, licença e créditos	Version, author, licence and credits
 Tensão da bateria no pino 16 da ficha OBD, medida pelo interface J2534 (não pela ECU). Para programar convém ≥ 12 V, de preferência com carregador.	Battery voltage at OBD pin 16, measured by the J2534 interface (not by the ECU). For programming ≥ 12 V is advisable, ideally with a charger.
 Família da ECU. ME7.3.xx (Thesis, Stilo, Alfa 147…) ou ME3.1 (Stilo/Thesis 2.4). A ME3.1 usa outra subfunção de seed/key (0x55) e outro esquema de baud (pedido em 3 bytes); escolher aqui vai direto ao certo, sem tentativas falhadas.	ECU family. ME7.3.xx (Thesis, Stilo, Alfa 147…) or ME3.1 (Stilo/Thesis 2.4). The ME3.1 uses another seed/key sub-function (0x55) and another baud scheme (requested in 3 bytes); choosing here goes straight to the right one, with no failed attempts.
+Baud:	Baud:
+Ler flash externa (512 KB)…	Read external flash (512 KB)…
+Lê os 512 KB da flash externa (arranque incluído) por modo boot e grava-os num ficheiro.	Reads the 512 KB external flash (boot included) in boot mode and saves it to a file.
+Ler ROM interna (32 KB)…	Read internal ROM (32 KB)…
+Lê os 32 KB da ROM interna do C167 por modo boot e grava-os num ficheiro.	Reads the C167's 32 KB internal ROM in boot mode and saves it to a file.
+Ler EEPROM 95080 (1 KB)…	Read EEPROM 95080 (1 KB)…
+Lê a EEPROM SPI 95080 (chip-select P4.7, como nas ME7.3 e ME3.1 da Fiat) por modo boot e grava-a num ficheiro.	Reads the 95080 SPI EEPROM (chip-select P4.7, as on the Fiat ME7.3 and ME3.1) in boot mode and saves it to a file.
+Baud do modo boot (a ECU mede-o sozinha). 125000 é exato na UART do C167 (20 e 24 MHz); 115200 não é. Se der erros, baixa para 57600.	Boot mode baud (the ECU measures it itself). 125000 is exact on the C167 UART (20 and 24 MHz); 115200 is not. If there are errors, lower it to 57600.
+Modo:	Mode:
+OBD: ligar e gravar pela ficha de diagnóstico (K-line, KWP2000). BSL: modo boot do C167 (pino de boot), para ler a flash, a ROM interna e a EEPROM.	OBD: connect and flash through the diagnostic socket (K-line, KWP2000). BSL: C167 boot mode (boot pin), to read the flash, the internal ROM and the EEPROM.
+Modo boot (BSL)	Boot mode (BSL)
+Para entrar em modo boot: com a ECU sem alimentação, liga o pino de boot à massa, liga a alimentação e só depois carrega num botão. O cabo KKL (FTDI ou Série) fica na K-line; o J2534 não serve para o modo boot. Se a ECU já estiver em modo boot de uma leitura anterior, não é preciso repetir.	To enter boot mode: with the ECU unpowered, connect the boot pin to ground, power it up and only then press a button. The KKL cable (FTDI or Serial) stays on the K-line; a J2534 does not do boot mode. If the ECU is already in boot mode from a previous read, there is no need to repeat it.
+Ligar e identificar	Connect and identify
+Entra em modo boot e lê só o bloco de identificação da flash (HW, software, versão, desenho Fiat e família ME3.1/ME7.3.1). Demora uma fração de segundo.	Enters boot mode and reads only the flash identification block (HW, software, version, Fiat drawing and ME3.1/ME7.3.1 family). Takes a fraction of a second.
+Backup completo (flash + ROM interna + EEPROM)…	Full backup (flash + internal ROM + EEPROM)…
+Identifica e lê tudo de seguida: flash externa (512 KB), ROM interna (32 KB) e EEPROM (1 KB). Grava numa pasta, com o software no nome dos ficheiros e um info.txt com a identificação.	Identifies and reads everything in one go: external flash (512 KB), internal ROM (32 KB) and EEPROM (1 KB). Saves to a folder, with the software in the file names and an info.txt with the identification.
+Ler só uma parte (não escreve nada na ECU):	Read just one part (nothing is written to the ECU):
+Gravar a flash externa (512 KB com checksums corrigidos, ou original do Examiner):	Write the external flash (512 KB with corrected checksums, or an Examiner original):
+Gravar flash por BSL…	Write flash by BSL…
+Lê primeiro a flash toda e guarda-a como backup; depois apaga e grava só os sectores que mudam e verifica-os. Só aceita a flash Am29F400BB. O modo boot não confirma checksums: o ficheiro tem de estar correto.	First reads the whole flash and saves it as a backup; then erases and writes only the sectors that change and verifies them. Only accepts the Am29F400BB flash. Boot mode does not check checksums: the file must be correct.
+Antes de gravar:	Before writing:
+Comparar com um ficheiro lido por mim	Compare with a file I read
+Ler a ECU (backup e comparação)	Read the ECU (backup and comparison)
+Não comparar (grava tudo)	Don't compare (write everything)
+Lido da ECU:	Read from ECU:
+Comparar com um ficheiro lido por ti: rápido, grava só os sectores que mudam; confirma-se só que a identificação do ficheiro é a da ECU. Ler a ECU: lê a flash toda primeiro (backup e comparação exata), demora mais ~50 s. Não comparar: apaga e grava os sectores todos. Na EEPROM: "Não comparar" grava os 1024 bytes sem a ler; as outras leem-na e gravam só os bytes que mudam.	Compare with a file you read: fast, writes only the sectors that change; only the file's identification is checked against the ECU. Read the ECU: reads the whole flash first (backup and exact comparison), takes ~50 s more. Don't compare: erases and writes all sectors. For the EEPROM: "Don't compare" writes all 1024 bytes without reading it; the others read it and write only the bytes that change.
+Leitura de 512 KB do que está agora na ECU (por exemplo o backup feito por BSL).	512 KB read of what is in the ECU now (for example the BSL backup).
+Opções da gravação (BSL)	Write options (BSL)
+Verificar depois de gravar	Verify after writing
+Relê os sectores gravados e compara-os com o ficheiro (leva quase tanto tempo como a gravação).	Re-reads the written sectors and compares them with the file (takes almost as long as the write).
+Apaga e grava os sectores conforme as opções da gravação (à esquerda). Só aceita a flash Am29F400BB. O modo boot não confirma checksums: o ficheiro tem de estar correto.	Erases and writes the sectors according to the write options (on the left). Only accepts the Am29F400BB flash. Boot mode does not check checksums: the file must be correct.
+Gravar a EEPROM 95080 (ficheiro de 1 KB):	Write the EEPROM 95080 (1 KB file):
+Gravar EEPROM por BSL…	Write EEPROM by BSL…
+Segue as opções da gravação (à esquerda): compara e grava só os bytes que mudam, ou grava tudo com "Não comparar"; verifica se "Verificar" estiver ligado. Demora poucos segundos.	Follows the write options (on the left): compares and writes only the bytes that change, or writes everything with "Don't compare"; verifies if "Verify" is on. Takes a few seconds.
+Guardar o que se lê antes de gravar (pede a pasta)	Save what is read before writing (asks for the folder)
+Guarda num ficheiro o que se lê antes de gravar: a EEPROM (é sempre lida para comparar) e a flash quando a opção é "Ler a ECU" (nas outras opções a flash não se lê). Se já fizeste um backup, não é preciso.	Saves to a file what is read before writing: the EEPROM (always read for the comparison) and the flash when the option is "Read the ECU" (with the other options the flash is not read). Not needed if you already made a backup.
+Repor backup (flash + EEPROM)…	Restore backup (flash + EEPROM)…
+Escolhe um ficheiro de um backup completo (…_info.txt, …_flash.bin ou …_eeprom.bin): grava a flash e depois a EEPROM desse backup, com as opções da gravação (à esquerda). A ROM interna não se grava (é OTP).	Choose a file from a full backup (…_info.txt, …_flash.bin or …_eeprom.bin): writes that backup's flash and then its EEPROM, with the write options (on the left). The internal ROM is not written (it is OTP).
+Ligações do modo boot	Boot mode wiring
+Desenho esquemático (vista com a etiqueta em baixo à direita): as posições são aproximadas, confirma sempre pelo número do pino. O +12V e a massa vêm de uma fonte de bancada; a K-line liga ao cabo KKL.	Schematic drawing (viewed with the label at the bottom right): positions are approximate, always check by the pin number. +12V and ground come from a bench power supply; the K-line goes to the KKL cable.

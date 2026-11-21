@@ -1,0 +1,14 @@
+Binários do modo boot (BSL) do C167 / ST10
+==========================================
+
+Copiados do projeto C167BootTool (licença GPL-3.0), que por sua vez se inspira no ArgDub, 360trev e Gremlin:
+
+- LOADK.bin          (32 bytes)  — loader do bootstrap loader do C167 (recebido em 0xFA40 e executado).
+- MINIMONK.bin       (394 bytes) — kernel do Minimon (comandos de ler/escrever memória, blocos, chamar funções).
+- Eeprom95Driver.bin (278 bytes) — "gremlindriver.bin": driver da EEPROM SPI 95xxx pela SSC do C167
+                                   (a fonte está no C167BootTool: Drivers/gremlinDriver.a66).
+- Flash29FDriver.bin (398 bytes) — "FX00Bx_Driver.bin": driver das flash AMD 29Fx00B (programar, apagar sector,
+                                   ler IDs). Fonte no C167BootTool: Drivers/A29fx00Bx.a66.
+
+ATENÇÃO antes de publicar: o LOADK e o MINIMONK vêm do Minimon (Infineon). O C167BootTool redistribui-os, mas
+não diz em que licença; confirmar que se podem redistribuir antes de os incluir num projeto público.

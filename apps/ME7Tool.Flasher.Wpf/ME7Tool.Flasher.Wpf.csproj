@@ -21,8 +21,8 @@
     <PlatformTarget>x86</PlatformTarget>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Product>FAL ME7.3.XX Flasher</Product>
-    <AssemblyTitle>FAL ME7.3.XX Flasher</AssemblyTitle>
+    <Product>FAL ME7.3.1/H4/ME3.1 Flasher</Product>
+    <AssemblyTitle>FAL ME7.3.1/H4/ME3.1 Flasher</AssemblyTitle>
     <!-- Ícone do executável (Explorador, barra de tarefas, título das janelas). -->
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>

@@ -4,7 +4,7 @@
 
 As chaves e os algoritmos abaixo foram obtidos por engenharia inversa, para interoperabilidade.
 
-Este documento explica o que o **FAL ME7.3.XX Flasher** faz quando reprograma uma ECU pela ficha OBD, porque é
+Este documento explica o que o **FAL ME7.3.1/H4/ME3.1 Flasher** faz quando reprograma uma ECU pela ficha OBD, porque é
 que foi difícil pô-lo a funcionar e o que pode correr mal. Baseia-se na desmontagem do firmware da ECU (ROM
 interna e aplicação) e em testes numa ECU real.
 
