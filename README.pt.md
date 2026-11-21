@@ -28,9 +28,6 @@ a ferramenta de fábrica da Fiat.
 - Funciona com um **cabo KKL FTDI** ou um **interface J2534** com suporte ISO 14230 (ex.: Scanmatik 2). Mostra a
   tensão da bateria quando o interface a sabe medir.
 
-O flasher faz uma coisa só: gravar a ECU (e desencriptar ficheiros do Examiner). Os patches à imagem, como ativar
-a escrita de RAM (0x3D), deixaram de fazer parte dele.
-
 ## ECUs suportadas
 
 | ECU | Carros | Testado numa ECU real | Tempo de flash (FTDI / Scanmatik 2) |
@@ -51,7 +48,6 @@ testado.
 - **J2534 (Scanmatik)**: as ECUs que deixam pausas grandes entre bytes (ME3.1) já não perdem as respostas; depois
   de trocar de baud a ligação é confirmada e volta a 10400 se a ECU não trocou.
 - Desliga de forma limpa depois de um flash bem-sucedido.
-- O patch de escrita de RAM (0x3D) saiu do flasher.
 
 ## Download
 

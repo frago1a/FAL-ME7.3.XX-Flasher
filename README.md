@@ -27,9 +27,6 @@ port, the same way the Fiat factory tool does.
 - Works with an **FTDI KKL cable** or a **J2534 interface** with ISO 14230 support (e.g. Scanmatik 2). Shows
   the battery voltage when the interface can measure it.
 
-The flasher does one thing: flash the ECU (and decrypt Examiner files). Image patches, such as enabling RAM
-writes (0x3D), are no longer part of it.
-
 ## Supported ECUs
 
 | ECU | Cars | Tested on a real ECU | Flash time (FTDI / Scanmatik 2) |
@@ -50,7 +47,6 @@ tested.
 - **J2534 (Scanmatik)**: ECUs that leave long gaps between bytes (ME3.1) no longer lose their answers; after a
   baud change the link is checked and falls back to 10400 if the ECU did not switch.
 - The tool disconnects cleanly after a successful flash.
-- The RAM-writing (0x3D) image patch was removed from the flasher.
 
 ## Download
 
