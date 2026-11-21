@@ -188,11 +188,12 @@ public class Kwp2000InterfaceTests
     public void ResponsePending_WaitsP2Star_NotJustP2()
     {
         var (kwp, dev) = Make();   // ResponseTimeoutMs 200 ms neste teste
-        kwp.Timing.ResponsePendingTimeoutMs = 3000;
+        kwp.Timing.ResponsePendingTimeoutMs = 8000;
         dev.EnqueueResponse(Resp(0x7F, 0x3B, (byte)Kwp2000ResponseCode.ResponsePending));
         // a resposta final chega ~600 ms depois do 78 (mais do que o P2 de 200 ms, menos do que o P2*)
         var late = Resp(0x7B, 0x98);
-        _ = Task.Run(async () => { await Task.Delay(600); dev.InjectRx(late); });
+        // thread própria (não o thread pool: no CI, com os testes em paralelo, uma Task.Run chegava a atrasar > 3 s)
+        new Thread(() => { Thread.Sleep(600); dev.InjectRx(late); }) { IsBackground = true }.Start();
 
         var resp = kwp.SendService(Kwp2000Service.WriteDataByLocalIdentifier, 0x98, 0x20);
         Assert.True(resp.IsPositiveResponseTo(Kwp2000Service.WriteDataByLocalIdentifier));
